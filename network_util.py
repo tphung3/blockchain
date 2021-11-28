@@ -7,35 +7,45 @@ import http.client
 BUFSIZ = 1024
 CATALOG_SERVER = ('catalog.cse.nd.edu', 9097)
 NETID = "jrundle"
+PROJECT = "nd-coin"
+TYPE = "crypto"
 
 
-def find_addr(name):
+def find_peers():
     conn = http.client.HTTPConnection(*CATALOG_SERVER)
     conn.request("GET", "/query.json")
     data = conn.getresponse().read()
 
-    entries = [d for d in json.loads(data) if d.get('type') == "hashtable" and d.get("project") == name]
+    entries = [d for d in json.loads(data) if d.get('type') == PROJECT]
+    peers = dict()
 
-    latest_contact = 0
-    addr = None
-
+    attrs = ('type', 'owner', 'port', 'project', 'pub_key')
     for entry in entries:
-        if entry['lastheardfrom'] > latest_contact:
-            latest_contact = entry['lastheardfrom']
-            addr = (entry['address'], entry['port'])
+        for attr in attrs:
+            if entry.get(attr) is None:
+                continue
+
+        pub_key = entry['pub_key']
+
+        if pub_key in peers:
+            if entry['lastheardfrom'] > peers[pub_key]['lastheardfrom']:
+                peers[pub_key] = entry
+        else:
+            peers[pub_key] = entry
 
     conn.close()
     
-    return addr
+    return peers.values()
 
 
-def send_catalog_update(name, port, netid=NETID):
+def send_catalog_update(pubkey, port, type_=TYPE, project=PROJECT, netid=NETID):
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     data = json.dumps({
-        "type": "hashtable",
+        "type": type_,
         "owner": netid,
         "port": port,
-        "project": name 
+        "project": project,
+        "pub_key": pubkey
     }).encode()
     s.sendto(data, CATALOG_SERVER)
     s.close()

@@ -7,15 +7,15 @@ import time
 import socket
 import select
 import threading
-import NetworkFunctions
 import HashTable
+import network_util
 
 
 def send_catalog_updates(name, port):
     # send update every minute
     while True:
         start = time.time()
-        NetworkFunctions.send_catalog_update(name, port)
+        network_util.send_catalog_update(name, port)
         time.sleep(60 - (time.time() - start))
 
 
@@ -28,7 +28,7 @@ class HashTableServer:
 
     @staticmethod
     def send_error(conn, code, msg):
-        NetworkFunctions.send_json(conn, {
+        network_util.send_json(conn, {
             "status": "error",
             "error_code": code,
             "error_msg": msg
@@ -59,7 +59,7 @@ class HashTableServer:
                 else:
                     # other socket -> handle request
                     try:
-                        req = NetworkFunctions.rec_json(s)
+                        req = network_util.rec_json(s)
 
                         if req is None:
                             print("Client closed the connection")
@@ -96,7 +96,7 @@ class HashTableServer:
                 self.send_error(conn, 0, str(e))
                 return
 
-            NetworkFunctions.send_json(conn, {
+            network_util.send_json(conn, {
                 "status": "success"
             })
 
@@ -112,7 +112,7 @@ class HashTableServer:
                 self.send_error(conn, 0, str(e))
                 return
 
-            NetworkFunctions.send_json(conn, {
+            network_util.send_json(conn, {
                 "status": "success",
                 "result": value 
             })
@@ -129,7 +129,7 @@ class HashTableServer:
                 self.send_error(conn, 0, str(e))
                 return
 
-            NetworkFunctions.send_json(conn, {
+            network_util.send_json(conn, {
                 "status": "success",
                 "result": value 
             })
@@ -149,7 +149,7 @@ class HashTableServer:
                 self.send_error(conn, 1, str(e))
                 return
 
-            NetworkFunctions.send_json(conn, {
+            network_util.send_json(conn, {
                 "status": "success",
                 "result": matches
             })

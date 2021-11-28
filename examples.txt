@@ -14,7 +14,7 @@ Commands:
 10
 
 > pay ABC 5
-broadcasting block
+broadcasting transaction
 ...
 transaction successful
 
