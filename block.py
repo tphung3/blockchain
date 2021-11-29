@@ -60,5 +60,5 @@ class Block:
         txns = [txn.to_json() for txn in self.transactions]
         data += json.dumps(txns).encode()
 
-        return crypto.hash_data(data)
+        return crypto.double_sha256(data)
 

@@ -91,7 +91,7 @@ class Transaction:
         txn_in_bytes = b''
 
         for txn_in in self.inputs:
-            txn_in_bytes += crypto.hash_data(txn_in.to_json())
+            txn_in_bytes += crypto.double_sha256(txn_in.to_json())
         
         for txn_out in self.outputs:
             txn_bytes = txn_in_bytes + txn_out.pub_key
@@ -104,7 +104,7 @@ class Transaction:
 
         for txn_in in self.inputs:
             # assume all txn_in's pubkey matches sender_pubkey
-            txn_in_bytes += crypto.hash_data(txn_in.to_json())
+            txn_in_bytes += crypto.double_sha256(txn_in.to_json())
 
         for txn_out in self.outputs:
             txn_bytes = txn_in_bytes + txn_out.pub_key
@@ -117,7 +117,7 @@ class Transaction:
         data = b''
         data += json.dumps([txn_in.to_json() for txn_in in self.inputs]).encode()
         data += json.dumps([txn_out.to_json() for txn_out in self.outputs]).encode()
-        return crypto.hash_data(data)
+        return crypto.double_sha256(data)
 
 
 if __name__ == "__main__":

@@ -29,20 +29,22 @@ class BlockChain:
         blocks = []
 
         with open(block_file, 'r') as stream:
-            for line in stream.readlines():
+            for i, line in enumerate(stream.readlines()):
                 block_json = json.loads(line.strip())
                 block = Block.from_json(block_json)
                 if block is None:
-                    print('invalid block')
+                    print(f'invalid block on line {i} of {block_file}', file=sys.stderr)
                     continue
                 blocks.append(block)
         
         if level == 0 and len(blocks) != 1:
             # incorrect number of genesis blocks
+            print(f'{block_file} has the incorrect number of blocks for a genesis block', file=sys.stderr)
             return False
         
         for block in blocks:
-            self.load_block(block)
+            if not self.load_block(block):
+                return False
         
         return True
     
@@ -61,6 +63,31 @@ class BlockChain:
         # add transaction
         for txn in block.transactions:
             self.transactions[txn.txn_id] = txn
+        
+        return True
+    
+    def verify_block(self, block: Block):
+        h = block.compute_hash()
+        if block.block_hash != h:
+            # incorrect hash
+            print('incorrect hash', file=sys.stderr)
+            return False
+        if not valid_block_hash(h):
+            # invalid hash
+            print('invalid hash', file=sys.stderr)
+            return False
+        
+        if len(block.transactions) < 1:
+            # needs at least 1 txn
+            print('no transactions', file=sys.stderr)
+            return False
+        
+        for i, txn in enumerate(block.transactions):
+            # first txn is a coinbase txn
+            is_coinbase = (i == 0)
+            if not self.verify_transaction(txn, is_coinbase):
+                print('unable to verify transaction', file=sys.stderr)
+                return False
         
         return True
     
@@ -135,32 +162,6 @@ class BlockChain:
             return False
         
         return True
-    
-    def verify_block(self, block: Block):
-        h = block.compute_hash()
-        if block.block_hash != h:
-            # incorrect hash
-            print('incorrect hash', file=sys.stderr)
-            return False
-        if not valid_block_hash(h):
-            # invalid hash
-            print('invalid hash', file=sys.stderr)
-            return False
-        
-        if len(block.transactions) < 1:
-            # needs at least 1 txn
-            print('no transactions', file=sys.stderr)
-            return False
-        
-        for i, txn in enumerate(block.transactions):
-            # first txn is a coinbase txn
-            is_coinbase = (i == 0)
-            if not self.verify_transaction(txn, is_coinbase):
-                print('unable to verify transaction', file=sys.stderr)
-                return False
-        
-        return True
-
 
 
 if __name__ == "__main__":

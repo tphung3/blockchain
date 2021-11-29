@@ -7,21 +7,24 @@ import time
 import socket
 import select
 import threading
-import HashTable
 import network_util
 
 
-def send_catalog_updates(name, port):
+def send_catalog_updates(pub_key, port):
     # send update every minute
     while True:
         start = time.time()
-        network_util.send_catalog_update(name, port)
+        network_util.send_catalog_update(pub_key, port)
         time.sleep(60 - (time.time() - start))
 
 
-class HashTableServer:
-    def __init__(self, name):
-        self.name = name
+class ChainServer:
+    def __init__(self, pub_key, pri_key):
+        self.pub_key = pub_key
+        self.pri_key = pri_key
+        
+        # TODO: initialize blockchain object
+        
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
         HashTable.restart()
@@ -42,7 +45,7 @@ class HashTableServer:
         print("Listening on port", self.port)
 
         # send catalog updates in background
-        threading.Thread(target=send_catalog_updates, args=(self.name, self.port), daemon=True).start()
+        threading.Thread(target=send_catalog_updates, args=(self.pub_key, self.port), daemon=True).start()
 
         sockets = set()
 
@@ -74,6 +77,8 @@ class HashTableServer:
                         self.send_error(s, -1, "Request was not in JSON format")
 
     def handle_request(self, conn, req):
+        # TODO: handle various requests
+
         method = req.get("method", None)
         if method is None:
             self.send_error(conn, -1, "Missing required 'method' property in request")
@@ -167,10 +172,12 @@ def usage(status):
 def main():
     if len(sys.argv) < 2:
         usage(1)
+    
+    # TODO: load keys, exit if not exists
+    pub_key = None
+    pri_key = None
 
-    name = sys.argv[1]
-
-    server = HashTableServer(name)
+    server = ChainServer(pub_key, pri_key)
     server.run()
 
 

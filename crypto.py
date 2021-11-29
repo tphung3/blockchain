@@ -14,9 +14,9 @@ PRIKEY_FILE = os.path.join(KEY_DIR, "ecdsa_key")
 PUBKEY_FILE = os.path.join(KEY_DIR, "ecdsa_key.pub")
 
 
-def hash_data(data: bytes) -> bytes:
-    h1 = HASH_FUNC(data)
-    h2 = HASH_FUNC(h1.digest())
+def double_sha256(data: bytes) -> bytes:
+    h1 = hashlib.sha256(data)
+    h2 = hashlib.sha256(h1.digest())
     return h2.digest()
 
 

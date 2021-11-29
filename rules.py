@@ -2,7 +2,7 @@ from utils import bytes_to_bits
 
 
 MINING_REWARD = 50
-MIN_ZEROS = 15
+MIN_ZEROS = 18
 
 
 def valid_block_hash(h):
