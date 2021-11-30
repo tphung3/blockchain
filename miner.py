@@ -11,27 +11,34 @@ class Strategy:
     INCREMENT = 1
 
 
-def find_nonce(block, strategy=Strategy.RANDOM):
-    i = 0
+class Miner:
+    def __init__(self, strategy=Strategy.RANDOM):
+        self.strategy = strategy
+        self.block = None
 
-    while True:
-        if strategy == Strategy.RANDOM:
-            nonce = randint(0, 1 << 256)
-        elif strategy == Strategy.INCREMENT:
-            nonce = i
-            i += 1
-        else:
-            raise ValueError("invalid strategy")
+    def load_transaction():
+        # TODO: implement mechanism to pool transactions into blocks
+        pass
 
-        h = block.compute_hash(nonce)
+    def find_nonce(self, block):
+        i = 0
 
-        if valid_block_hash(h):
-            return nonce
+        while True:
+            if self.strategy == Strategy.RANDOM:
+                nonce = randint(0, 1 << 256)
+            elif self.strategy == Strategy.INCREMENT:
+                nonce = i
+                i += 1
+
+            h = block.compute_hash(nonce)
+
+            if valid_block_hash(h):
+                return nonce
 
 
-def generate_coinbase_txn(public_key, private_key):
+def generate_coinbase_txn(public_key: bytes, private_key: bytes):
     txns_in = []
-    txns_out = [TxnOutput(crypto.key_to_bytes(public_key), MINING_REWARD)]
+    txns_out = [TxnOutput(public_key, MINING_REWARD)]
     txn = Transaction(txns_in, txns_out)
     txn.sign(private_key)
     return txn
@@ -53,7 +60,8 @@ if __name__ == "__main__":
 
     s = time()
 
-    nonce = find_nonce(b, strategy=Strategy.RANDOM)
+    m = Miner()
+    nonce = m.find_nonce(b)
     b.nonce = nonce
     b.block_hash = b.compute_hash(nonce)
     print("GENESIS BLOCK:", json.dumps(b.to_json()))

@@ -50,22 +50,26 @@ def save_public_key(public_key: ecdsa.VerifyingKey, key_file=PUBKEY_FILE, overwr
 def load_private_key(key_file=PRIKEY_FILE):
     with open(key_file, 'rb') as stream:
         pem = stream.read()
-        return ecdsa.SigningKey.from_pem(pem, hashfunc=HASH_FUNC)
+        sk = ecdsa.SigningKey.from_pem(pem, hashfunc=HASH_FUNC)
+        return key_to_bytes(sk)
 
 
 def load_public_key(key_file=PUBKEY_FILE):
     with open(key_file, 'rb') as stream:
         pem = stream.read()
-        return ecdsa.VerifyingKey.from_pem(pem, hashfunc=HASH_FUNC)
+        vk = ecdsa.VerifyingKey.from_pem(pem, hashfunc=HASH_FUNC)
+        return key_to_bytes(vk)
 
 
-def sign(data: bytes, private_key: ecdsa.SigningKey) -> bytes:
-    return private_key.sign(data)
+def sign(private_key, data: bytes) -> bytes:
+    private_key_obj = bytes_to_private_key(private_key)
+    return private_key_obj.sign(data)
 
 
-def verify(signature: bytes, data: bytes, public_key: ecdsa.VerifyingKey) -> bool:
+def verify(public_key: bytes, signature: bytes, data: bytes) -> bool:
     try:
-        return public_key.verify(signature, data)
+        public_key_obj = bytes_to_public_key(public_key)
+        return public_key_obj.verify(signature, data)
     except Exception as e:
         print("error during verify:", e, file=sys.stderr)
         return False

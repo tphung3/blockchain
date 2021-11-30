@@ -1,15 +1,26 @@
 from dataclasses import dataclass, asdict
 from typing import List
 import json
-import ecdsa
 import crypto
 
 
 MAX_TXN_COUNT = 10
 
 
+class Serializable:
+    @classmethod
+    def from_json(cls, json_data):
+        raise NotImplementedError
+
+    def to_json(self):
+        raise NotImplementedError
+
+    def to_bytes(self):
+        return json.dumps(self.to_json()).encode()
+
+
 @dataclass
-class TxnInput:
+class TxnInput(Serializable):
     txn_id: bytes
     index: int
 
@@ -29,7 +40,7 @@ class TxnInput:
         }
 
 
-class TxnOutput:
+class TxnOutput(Serializable):
     def __init__(self,
             pub_key: bytes,
             amount: int,
@@ -59,7 +70,7 @@ class TxnOutput:
         }
 
 
-class Transaction:
+class Transaction(Serializable):
     def __init__(self, inputs: List[TxnInput], outputs: List[TxnOutput], txn_id: bytes = None):
         self.inputs = inputs
         self.outputs = outputs
@@ -87,28 +98,28 @@ class Transaction:
             "outputs": [txn_out.to_json() for txn_out in self.outputs]
         }
     
-    def sign(self, sender_private_key: ecdsa.SigningKey):
+    def sign(self, sender_private_key: bytes):
         txn_in_bytes = b''
 
         for txn_in in self.inputs:
-            txn_in_bytes += crypto.double_sha256(txn_in.to_json())
+            txn_in_bytes += txn_in.to_bytes()
         
         for txn_out in self.outputs:
-            txn_bytes = txn_in_bytes + txn_out.pub_key
-            txn_out.signature = crypto.sign(txn_bytes, sender_private_key)
+            txn_bytes = crypto.double_sha256(txn_in_bytes + txn_out.pub_key)
+            txn_out.signature = crypto.sign(sender_private_key, txn_bytes)
         
         self.txn_id = self.compute_txn_id()
     
-    def verify_signature(self, sender_pubkey: ecdsa.VerifyingKey):
+    def verify_signature(self, sender_pubkey: bytes):
         txn_in_bytes = b''
 
         for txn_in in self.inputs:
             # assume all txn_in's pubkey matches sender_pubkey
-            txn_in_bytes += crypto.double_sha256(txn_in.to_json())
+            txn_in_bytes += txn_in.to_bytes()
 
         for txn_out in self.outputs:
-            txn_bytes = txn_in_bytes + txn_out.pub_key
-            if not crypto.verify(txn_out.signature, txn_bytes, sender_pubkey):
+            txn_bytes = crypto.double_sha256(txn_in_bytes + txn_out.pub_key)
+            if not crypto.verify(sender_pubkey, txn_out.signature, txn_bytes):
                 return False
         
         return True
