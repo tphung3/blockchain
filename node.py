@@ -10,10 +10,13 @@ import threading
 from copy import deepcopy
 from chain import BlockChain
 import rules
+from block import Block
+from transaction import Transaction
 from wallet import Wallet
 from miner import Miner
 import network_util
 
+NUM_PEERS = 4
 
 TXN_QUEUE = []      # from network and wallet – used by miner
 BLOCK_QUEUE = []    # from network and miner – used by main and miner
@@ -41,6 +44,8 @@ def send_catalog_updates(pub_key, port):
 
 
 def run_wallet(wallet: Wallet):
+    global TXN_QUEUE, OUT_QUEUE
+
     while line := input("> "):
         args = line.split()
         
@@ -66,7 +71,10 @@ def run_wallet(wallet: Wallet):
             pass
 
         elif cmd == "peers":
-            pass
+            all_peers = network_util.get_peers()
+            print("List of all available peers to send coins to:")
+            for peer in all_peers:
+                print(f"Name: {peer['owner']}, public key: {peer['pub_key']}")
 
         else:
             print("invalid command:", cmd)
@@ -177,7 +185,83 @@ def run_miner(miner: Miner):
                 # restart mining
                 break
 
-            
+           
+def run_network(main_socket):
+    #get all peers' information before doing anything else
+    all_peers = network_util.find_peers()
+
+    #dict of outward TCP sockets (only for sending messages to other peers)
+    out_sockets = []
+
+    #set up a TCP connection to each peer 
+    for peer in all_peers:
+        out_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        out_address = (peer['address'], int(peer['port']))
+        out_socket.connect(out_address)
+        out_sockets.append(out_socket)
+    
+    sockets = set()
+    while True:
+        #listen phase
+        inputs = [main_socket] + list(sockets)
+        readable, _, _ = select.select(inputs, [], [])
+        for s in readable:
+            if s == main_socket:
+                # main socket -> accept new connection
+                conn, _ = main_socket.accept()
+                sockets.add(conn)
+                print("Accepted a connection")
+            else:
+                # other socket -> handle request
+                try:
+                    req = network_util.rec_json(s)
+                    if req is None:
+                        print("Client closed the connection")
+                        s.close()
+                        sockets.remove(s)
+                        continue
+
+                    handle_request(req)
+
+                except ValueError:
+                    # good request, but invalid JSON -> send error msg and return
+                    pass # self.send_error(s, -1, "Request was not in JSON format")
+
+        #speak phase
+        with out_queue_lock:
+            if len(OUT_QUEUE) > 0:
+                while (len(OUT_QUEUE) > 0):
+                    out_req = OUT_QUEUE[0]
+                    handle_out_request(out_sockets, out_req)
+                    OUT_QUEUE.pop(0)
+            else:
+                pass
+
+#handle 3 types of outgoing requests: transactions, blocks, and request blocks
+def handle_out_request(out_sockets, out_req):
+    out_req_type = out_req.get("type", None)
+    if out_req_type == "block" or out_req_type == "transaction":
+        for out_socket in out_sockets:
+            network_util.send_json(out_socket, out_req.get("data"))
+    else:
+        pass
+
+#handle 3 types of incoming requests: transactions, blocks, and request blocks
+def handle_request(req):
+    request_type = req.get("type", None)
+    if request_type == "block":
+        with block_queue_lock:
+            BLOCK_QUEUE.append(Block.from_json(req.get("data")))
+    elif request_type == "transaction":
+        with txn_queue_lock:
+            TXN_QUEUE.append(Transaction.from_json(req.get("data")))
+    elif request_type == "block_requests":
+        #TODO
+        pass
+    else:
+        #TODO
+        pass
+
 
 class ChainServer:
     def __init__(self, pub_key, pri_key):
@@ -187,8 +271,6 @@ class ChainServer:
         # TODO: initialize blockchain object
         
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-
-        HashTable.restart()
 
     @staticmethod
     def send_error(conn, code, msg):
@@ -208,121 +290,8 @@ class ChainServer:
         # send catalog updates in background
         threading.Thread(target=send_catalog_updates, args=(self.pub_key, self.port), daemon=True).start()
 
-        sockets = set()
-
-        while True:
-            inputs = [self.socket] + list(sockets)
-            readable, _, _ = select.select(inputs, [], [])
-
-            for s in readable:
-                if s == self.socket:
-                    # main socket -> accept new connection
-                    conn, _ = self.socket.accept()
-                    sockets.add(conn)
-                    print("Accepted a connection")
-                else:
-                    # other socket -> handle request
-                    try:
-                        req = network_util.rec_json(s)
-
-                        if req is None:
-                            print("Client closed the connection")
-                            s.close()
-                            sockets.remove(s)
-                            continue
-
-                        self.handle_request(s, req)
-
-                    except ValueError:
-                        # good request, but invalid JSON -> send error msg and return
-                        self.send_error(s, -1, "Request was not in JSON format")
-
-    def handle_request(self, conn, req):
-        # TODO: handle various requests
-
-        method = req.get("method", None)
-        if method is None:
-            self.send_error(conn, -1, "Missing required 'method' property in request")
-            return
-
-        if method == "insert":
-            key = req.get("key", None)
-            if key is None:
-                self.send_error(conn, -1, "Missing required 'key' property in request")
-                return
-
-            value = req.get("value", None)
-            if value is None:
-                self.send_error(conn, -1, "Missing required 'value' property in request")
-                return
-
-            try:
-                HashTable.insert(key, value)
-            except TypeError as e:
-                self.send_error(conn, 0, str(e))
-                return
-
-            network_util.send_json(conn, {
-                "status": "success"
-            })
-
-        elif method == "lookup":
-            key = req.get("key", None)
-            if key is None:
-                self.send_error(conn, -1, "Missing required 'key' property in request")
-                return
-
-            try:
-                value = HashTable.lookup(key)
-            except TypeError as e:
-                self.send_error(conn, 0, str(e))
-                return
-
-            network_util.send_json(conn, {
-                "status": "success",
-                "result": value 
-            })
-
-        elif method == "remove":
-            key = req.get("key", None)
-            if key is None:
-                self.send_error(conn, -1, "Missing required 'key' property in request")
-                return
-
-            try:
-                value = HashTable.remove(key)
-            except TypeError as e:
-                self.send_error(conn, 0, str(e))
-                return
-
-            network_util.send_json(conn, {
-                "status": "success",
-                "result": value 
-            })
-
-        elif method == "scan":
-            regex = req.get("regex", None)
-            if regex is None:
-                self.send_error(conn, -1, "Missing required 'regex' property in request")
-                return
-            
-            try:
-                matches = HashTable.scan(regex)
-            except TypeError as e:
-                self.send_error(conn, 0, str(e))
-                return
-            except ValueError as e:
-                self.send_error(conn, 1, str(e))
-                return
-
-            network_util.send_json(conn, {
-                "status": "success",
-                "result": matches
-            })
-
-        else:
-            self.send_error(conn, -1, method + " method not recognized")
-            return
+        #send network interface in background
+        threading.Thread(target=run_network, args=(self.socket), daemon=True).start()
 
 
 def usage(status):
@@ -332,7 +301,7 @@ def usage(status):
 
 def main():
     if len(sys.argv) < 2:
-        usage(1)
+        pass # usage(1)
     
     import crypto
     pub_key = crypto.load_public_key()
