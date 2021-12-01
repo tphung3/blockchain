@@ -1,8 +1,5 @@
 from typing import List, Tuple
-
-from ecdsa.keys import VerifyingKey
 from transaction import Transaction, TxnInput, TxnOutput
-from chain import BlockChain
 import crypto
 
 
@@ -66,7 +63,8 @@ class Wallet:
 if __name__ == "__main__":
     pub_key = crypto.load_public_key()
     pri_key = crypto.load_private_key()
-
+    
+    from chain import BlockChain
     chain = BlockChain()
     wallet = Wallet(pub_key, pri_key)
 

@@ -12,36 +12,50 @@ class Strategy:
 
 
 class Miner:
-    def __init__(self, strategy=Strategy.RANDOM):
+    def __init__(self, pub_key, pri_key, strategy=Strategy.RANDOM):
+        self.pub_key = pub_key
+        self.pri_key = pri_key
         self.strategy = strategy
-        self.block = None
 
-    def load_transaction():
-        # TODO: implement mechanism to pool transactions into blocks
+        self.block = None
+        self.transactions = dict()  # { txn_id -> Transaction }
+        
+        # INCREMENT strategy
+        self.i = 0
+
+    def add_txn(self, txn: Transaction):
+        self.transactions[txn.txn_id] = txn
+    
+    def rem_txn(self, txn: Transaction):
         pass
 
-    def find_nonce(self, block):
-        i = 0
+    def reset_block(self):
+        pass
 
-        while True:
-            if self.strategy == Strategy.RANDOM:
-                nonce = randint(0, 1 << 256)
-            elif self.strategy == Strategy.INCREMENT:
-                nonce = i
-                i += 1
+    def first_nonce(self):
+        self.i = 0
 
-            h = block.compute_hash(nonce)
+    def next_nonce(self):
+        nonce = None
 
-            if valid_block_hash(h):
-                return nonce
-
-
-def generate_coinbase_txn(public_key: bytes, private_key: bytes):
-    txns_in = []
-    txns_out = [TxnOutput(public_key, MINING_REWARD)]
-    txn = Transaction(txns_in, txns_out)
-    txn.sign(private_key)
-    return txn
+        if self.strategy == Strategy.RANDOM:
+            nonce = randint(0, 1 << 256)
+        elif self.strategy == Strategy.INCREMENT:
+            nonce = self.i
+            self.i += 1
+        
+        return nonce
+    
+    def valid_nonce(self, block, nonce):
+        h = block.compute_hash(nonce)
+        return valid_block_hash(h)
+    
+    def generate_coinbase_txn(self):
+        txns_in = []
+        txns_out = [TxnOutput(self.pub_key, MINING_REWARD)]
+        txn = Transaction(txns_in, txns_out)
+        txn.sign(self.pri_key)
+        return txn
 
 
 if __name__ == "__main__":
@@ -52,17 +66,21 @@ if __name__ == "__main__":
 
     pub_key = crypto.load_public_key()
     pri_key = crypto.load_private_key()
-    txn = generate_coinbase_txn(pub_key, pri_key)
+
+    m = Miner(pub_key, pri_key)
+    txn = m.generate_coinbase_txn()
     print("COINBASE TXN:", txn.to_json())
     assert txn.verify_signature(pub_key)
 
     b = Block(b'0', 0, 0, [txn])
 
     s = time()
-
-    m = Miner()
-    nonce = m.find_nonce(b)
-    b.nonce = nonce
+    m.first_nonce()
+    while nonce := m.next_nonce():
+        if m.valid_nonce(b, nonce):
+            b.nonce = nonce
+            break
+    
     b.block_hash = b.compute_hash(nonce)
     print("GENESIS BLOCK:", json.dumps(b.to_json()))
     

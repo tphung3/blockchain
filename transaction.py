@@ -98,6 +98,12 @@ class Transaction(Serializable):
             "outputs": [txn_out.to_json() for txn_out in self.outputs]
         }
     
+    def to_message(self):
+        return {
+            "type": "transaction",
+            "data": self.to_json()
+        }
+    
     def sign(self, sender_private_key: bytes):
         txn_in_bytes = b''
 

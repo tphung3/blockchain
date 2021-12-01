@@ -47,6 +47,12 @@ class Block:
             "nonce": self.nonce,
             "transactions": [txn.to_json() for txn in self.transactions]
         }
+    
+    def to_message(self):
+        return {
+            "type": "block",
+            "data": self.to_json()
+        }
 
     def compute_hash(self, nonce=None):
         if nonce is None:

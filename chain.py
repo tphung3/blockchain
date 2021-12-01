@@ -224,7 +224,7 @@ class BlockChain:
 
         return True
 
-    def verify_transaction(self, txn: Transaction, is_coinbase: bool) -> bool:
+    def verify_transaction(self, txn: Transaction, is_coinbase: bool = False) -> bool:
         if txn.txn_id in self.transactions:
             print('duplicate transaction', file=sys.stderr)
             return False
