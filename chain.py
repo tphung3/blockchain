@@ -140,11 +140,13 @@ class BlockChain:
         Apply block transactions onto chain, updating transaction dict accordingly
         """
         for txn in block_node.data.transactions:
-            # add transaction to dict
-            self.transactions[txn.txn_id] = txn
+            self.apply_transaction(txn)
+    
+    def apply_transaction(self, txn: Transaction) -> None:
+        self.transactions[txn.txn_id] = txn
 
-            for coin in self.coin_inputs(txn):
-                coin.spent = True
+        for coin in self.coin_inputs(txn):
+            coin.spent = True
 
     def revert_block(self, block_node: BlockChainNode) -> None:
         """
@@ -154,12 +156,14 @@ class BlockChain:
             - all txns in `block_node` have been applied
         """
         for txn in reversed(block_node.data.transactions):
-            # remove from dict
-            self.transactions.pop(txn.txn_id)
+            self.revert_transaction(txn)
+    
+    def revert_transaction(self, txn: Transaction) -> None:
+        self.transactions.pop(txn.txn_id)
 
-            for coin in self.coin_inputs(txn):
-                coin.spent = False
-
+        for coin in self.coin_inputs(txn):
+            coin.spent = False
+    
     def move_head(self, src: BlockChainNode, dst: BlockChainNode) -> BlockChainNode:
         """
         Moves head of chain from one node to another

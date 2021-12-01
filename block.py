@@ -53,6 +53,10 @@ class Block:
             "type": "block",
             "data": self.to_json()
         }
+    
+    def set_nonce(self, nonce):
+        self.nonce = nonce
+        self.block_hash = self.compute_hash()
 
     def compute_hash(self, nonce=None):
         if nonce is None:

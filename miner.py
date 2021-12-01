@@ -17,20 +17,19 @@ class Miner:
         self.pri_key = pri_key
         self.strategy = strategy
 
-        self.block = None
-        self.transactions = dict()  # { txn_id -> Transaction }
+        self.pending_txns = []
         
         # INCREMENT strategy
         self.i = 0
 
-    def add_txn(self, txn: Transaction):
-        self.transactions[txn.txn_id] = txn
+    def add_pending_txn(self, txn: Transaction):
+        self.pending_txns.append(txn)
     
-    def rem_txn(self, txn: Transaction):
-        pass
+    def num_pending_txns(self):
+        return len(self.pending_txns)
 
-    def reset_block(self):
-        pass
+    def reset_pending_txns(self):
+        self.pending_txns = [self.generate_coinbase_txn()]
 
     def first_nonce(self):
         self.i = 0
@@ -45,6 +44,9 @@ class Miner:
             self.i += 1
         
         return nonce
+    
+    def compose_block(self, prev_hash, height):
+        return Block(prev_hash, height, 0, self.pending_txns)
     
     def valid_nonce(self, block, nonce):
         h = block.compute_hash(nonce)
@@ -78,10 +80,9 @@ if __name__ == "__main__":
     m.first_nonce()
     while nonce := m.next_nonce():
         if m.valid_nonce(b, nonce):
-            b.nonce = nonce
+            b.set_nonce(nonce)
             break
     
-    b.block_hash = b.compute_hash(nonce)
     print("GENESIS BLOCK:", json.dumps(b.to_json()))
     
     bits = bytes_to_bits(b.block_hash)
