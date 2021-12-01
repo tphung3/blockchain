@@ -56,6 +56,16 @@ def run_wallet(wallet: Wallet, chain: BlockChain):
             with out_queue_lock:
                 OUT_QUEUE.append(txn.to_message())
 
+		if cmd == "list_peers":
+			all_peers = get_peers()
+			print("List of all available peers to send coins to:")
+			for peer in all_peers:
+				print("Name: {}, public key: {}".format(str(peer.get('owner')), str(peer.get('pub_key'))))
+		
+		if cmd == "show_account":
+			bc = CHAIN
+			pass
+
 
 def run_miner(miner: Miner, chain: BlockChain):
     # accept incoming txns until timeout or max threshold
