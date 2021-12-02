@@ -44,7 +44,7 @@ def send_catalog_updates(pub_key, port):
 
 
 def run_wallet(wallet: Wallet):
-    global TXN_QUEUE, OUT_QUEUE
+    global TXN_QUEUE, OUT_QUEUE, CHAIN
 
     while line := input("> "):
         args = line.split()
@@ -65,7 +65,35 @@ def run_wallet(wallet: Wallet):
                 OUT_QUEUE.append(txn.to_message())
         
         elif cmd == "balance":
-            pass
+
+			#get all txns
+            all_txns = CHAIN.transactions
+			
+			#let wallet load all txns where wallet is payee
+			wallet.load_transactions(all_txns)
+			coin_in_txns = wallet.transactions
+
+			#find all txns where wallet is payer
+			coin_out_txns = []
+			for txn in all_txns:
+				for txn_in in txn.inputs:
+					if txn_in.pub_key == wallet.pub_key:
+						coin_in_txns.append(txn)
+
+			#the balance should be the difference between total coins in and total coins out
+			total_coins_in = 0
+			for txn in coin_in_txns:
+				for txn_out in txn:
+					if txn_out.pub_key == wallet.pub_key:
+						total_coins_in += txn_out.amount
+						break
+
+			total_coins_out = 0
+			for txn in coin_out_txns:
+				for txn_in in txn.inputs:
+					if txn_in.pub_key == wallet.pub_key:
+						#total_coins_out += 
+						pass
 
         elif cmd == "history":
             pass
@@ -187,6 +215,8 @@ def run_miner(miner: Miner):
 
            
 def run_network(main_socket):
+
+	global OUT_QUEUE
     #get all peers' information before doing anything else
     all_peers = network_util.find_peers()
 
@@ -248,6 +278,9 @@ def handle_out_request(out_sockets, out_req):
 
 #handle 3 types of incoming requests: transactions, blocks, and request blocks
 def handle_request(req):
+	
+	GLOBAL BLOCK_QUEUE, TXN_QUEUE 
+
     request_type = req.get("type", None)
     if request_type == "block":
         with block_queue_lock:
@@ -290,7 +323,7 @@ class ChainServer:
         # send catalog updates in background
         threading.Thread(target=send_catalog_updates, args=(self.pub_key, self.port), daemon=True).start()
 
-        #send network interface in background
+        #run network interface in background
         threading.Thread(target=run_network, args=(self.socket), daemon=True).start()
 
 
