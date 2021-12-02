@@ -108,110 +108,116 @@ def run_wallet(wallet: Wallet):
             print("invalid command:", cmd)
 
 
+def accept_txns(miner: Miner, chain: BlockChain, pool: list, used: list):
+    global CHAIN_MODIFIED, TXN_QUEUE
+
+    miner.reset_pending_txns()
+    s = time.time()
+
+    while True:
+        # accept incoming txns until timeout, max txn count, or chain modification
+
+        if CHAIN_MODIFIED:
+            with chain_modified_lock:
+                # unset flag
+                CHAIN_MODIFIED = False
+
+            return False
+
+        # timeout
+        if time.time() - s >= rules.MINER_WAIT_TIMEOUT:
+            # more than just coinbase txn
+            if miner.num_pending_txns() > 1:
+                return True
+
+            # keep waiting, but refresh timeout
+            s = time.time()
+
+        with txn_queue_lock:
+            while TXN_QUEUE:
+                txn = TXN_QUEUE.pop(0)
+                pool.append(txn)
+                used.append(False)
+                print('added', txn, 'to pool')
+
+        for i, txn in enumerate(pool):
+            if used[i]:
+                continue
+
+            print("looking at", txn)
+
+            if not chain.verify_transaction(txn):
+                print("bad txn, removing from pool")
+                # discard invalid txn
+                pool.pop(i)
+                used.pop(i)
+                continue
+
+            print("adding txn to block")
+            used[i] = True
+            miner.add_pending_txn(txn)
+            chain.apply_transaction(txn)
+
+            if miner.num_pending_txns() >= rules.MAX_TXN_COUNT:
+                return True
+
+
+def find_nonce(miner: Miner, chain: BlockChain, pool: list, used: list):
+    global CHAIN_MODIFIED, BLOCK_QUEUE, OUT_QUEUE
+    print("started mining")
+
+    chain_head = chain.head_block.data
+    block = miner.compose_block(chain_head.block_hash, chain_head.height + 1)
+
+    miner.first_nonce()
+    while nonce := miner.next_nonce():
+        if miner.valid_nonce(block, nonce):
+            block.set_nonce(nonce)
+
+            print("found nonce!")
+            print("block:", block.to_json())
+
+            with block_queue_lock:
+                BLOCK_QUEUE.append(block)
+            with out_queue_lock:
+                OUT_QUEUE.append(block.to_message())
+
+            # remove txns used in block
+            pool = [txn for i, txn in enumerate(pool) if not used[i]]
+            used = [False for _ in pool]
+
+            return True
+
+        # invalid nonce + chain has been modified
+        elif CHAIN_MODIFIED:
+            for i in range(len(used)):
+                # unmark all txns in pool
+                used[i] = False
+
+            with chain_modified_lock:
+                # unset flag
+                CHAIN_MODIFIED = False
+
+            return False
+
+
 def run_miner(miner: Miner):
-    global CHAIN, CHAIN_MODIFIED, BLOCK_QUEUE, OUT_QUEUE
+    global CHAIN
 
     pool = []   # pool of txns to mine
     used = []   # flag for each txn (if in current mining block)
 
     while True:
-        s = time.time()
-
         with chain_lock:
             # checkout current state of chain
             chain = deepcopy(CHAIN)
             print('copied chain')
-
-        start_mining = False
-        miner.reset_pending_txns()
-
-        while True:
-            # accept incoming txns until timeout, max txn count, or chain modification
-
-            if CHAIN_MODIFIED:
-                with chain_modified_lock:
-                    # unset flag
-                    CHAIN_MODIFIED = False
-                # reset mining
-                break
-            
-            # timeout
-            if time.time() - s >= rules.MINER_WAIT_TIMEOUT:
-                # more than just coinbase txn
-                start_mining = (miner.num_pending_txns() > 1)
-                break
-
-            with txn_queue_lock:
-                while TXN_QUEUE:
-                    txn = TXN_QUEUE.pop(0)
-                    pool.append(txn)
-                    used.append(False)
-                    print('added', txn, 'to pool')
-            
-            for i, txn in enumerate(pool):
-                if used[i]:
-                    continue
-
-                print("looking at", txn)
-
-                if not chain.verify_transaction(txn):
-                    print("bad txn, removing from pool")
-                    # discard invalid txn
-                    pool.pop(i)
-                    used.pop(i)
-                    continue
-                
-                print("adding txn to block")
-                used[i] = True
-                miner.add_pending_txn(txn)
-                chain.apply_transaction(txn)
-
-                if miner.num_pending_txns() >= rules.MAX_TXN_COUNT:
-                    start_mining = True
-                    break
-            else:
-                continue
-            # exit while loop if break was used to exit for loop
-            break
         
-        if not start_mining:
+        if not accept_txns(miner, chain, pool, used):
             continue
 
-        print("started mining")
+        find_nonce(miner, chain, pool, used)
 
-        chain_head = chain.head_block.data
-        block = miner.compose_block(chain_head.block_hash, chain_head.height + 1)
-        
-        miner.first_nonce()
-        while nonce := miner.next_nonce():
-            if miner.valid_nonce(block, nonce):
-                block.set_nonce(nonce)
-
-                print("found nonce!")
-                print("block:", block)
-                
-                with block_queue_lock:
-                    BLOCK_QUEUE.append(block)
-                with out_queue_lock:
-                    OUT_QUEUE.append(block.to_message())
-                
-                # remove txns used in block
-                pool = [txn for i, txn in enumerate(pool) if not used[i]]
-                used = [False for _ in pool]
-                break
-
-            # invalid nonce + chain has been modified
-            elif CHAIN_MODIFIED:
-                for i in range(len(used)):
-                    # unmark all txns in pool
-                    used[i] = False
-                    
-                with chain_modified_lock:
-                    # unset flag
-                    CHAIN_MODIFIED = False
-                
-                # restart mining
-                break
 
            
 def run_network(main_socket):
@@ -341,11 +347,19 @@ def main():
     pri_key = crypto.load_private_key()
     miner = Miner(pub_key, pri_key)
 
+    # good
     txn_list = [
-        {"txn_id": "6f40874fff99062f4c8860d8803eb2b859dbc299fd737237573b55099612e6da", "inputs": [{"txn_id": "06eeaf748440eccc5fe44bc53b3c032b183b57f4274361484e4fbea508ebc872", "index": 0}], "outputs": [{"pub_key": "61626364", "amount": 40, "signature": "940f5d6abd27ae1cd3a8e438c88db5d847c3dcb96828807b61f21e9a210c5a02342e6870a782983697e3e299e2ea3349fb1b55c579c0e631cff3fe730cc3e98e"}, {"pub_key": "fba402ee09ca9b71faffd70212a6a25aa57b9d72353a7f0e62a70e61ff325b68ac63039d5bf654cddcf2595961d0b0d342a13b2b31f103198bdf320259dc6166", "amount": 10, "signature": "72c252a4c16b70b81962556e76826d96e5841f0a19929a4612333e136e446cd0cb807c7a797c1df68a4e59dda1448669bbc09f894a6808a1119e360b129db261"}]},
-        {"txn_id": "c82a104b14116236cf71b3e73b4a00db5aa507d500b5dc342f804b1371e14b63", "inputs": [{"txn_id": "06eeaf748440eccc5fe44bc53b3c032b183b57f4274361484e4fbea508ebc872", "index": 0}], "outputs": [{"pub_key": "61626364", "amount": 5, "signature": "01342433b47ef336ff3edd2850f408bdfbf28e5c56cff080a9ac5a45fb4e3f6bc63f10ac5291076909e2ff948e70f421f6148207e4a5f4da77dcf693ba6f5b7f"}, {"pub_key": "fba402ee09ca9b71faffd70212a6a25aa57b9d72353a7f0e62a70e61ff325b68ac63039d5bf654cddcf2595961d0b0d342a13b2b31f103198bdf320259dc6166", "amount": 45, "signature": "d5b845ebe5e1ccaa20fcd1bcc2fafa5cbb4b32fe8e20da480d44332d0b1a7181797c7c52b76d742537ad69d18cac454c7acd504be6fb95cccf8336bad0ae467e"}]},
-        {"txn_id": "0f3e53367f4d8d67f00393e46cbba3f6f3e32b4eed6f00154667dafef3dd4cee", "inputs": [{"txn_id": "06eeaf748440eccc5fe44bc53b3c032b183b57f4274361484e4fbea508ebc872", "index": 0}], "outputs": [{"pub_key": "61626364", "amount": 4, "signature": "423f608a44503285001f15e48794211aa1fc90e28c48f675ab380a165cba65ed839262ac92deacaa92188890eaf84ad5c67bf139ee645d4e4605572009fbd145"}, {"pub_key": "fba402ee09ca9b71faffd70212a6a25aa57b9d72353a7f0e62a70e61ff325b68ac63039d5bf654cddcf2595961d0b0d342a13b2b31f103198bdf320259dc6166", "amount": 46, "signature": "a60b851f961bb086bec521a9d78bc29fca23035440fea3d870f13bf3c783bb2d1aff19e6a3aa1f1cfdcef433e5307b17610035cf29cd4e409424b464a3e08b30"}]}
+        {"txn_id": "1f7fde67c75b03ceea8d745aeb82c0ce127f667992cc710f970dc3a90abd63d4", "inputs": [{"txn_id": "06eeaf748440eccc5fe44bc53b3c032b183b57f4274361484e4fbea508ebc872", "index": 0}], "outputs": [{"pub_key": "61626364", "amount": 40, "signature": "5061e1f8c8fe507381dfee844b5def68c8c570f290807032ff13b844cf4eeb15a111fa4b41b08f31e1d9bcc951f023d7aeb23d00917d6eb1f0e14a4f8b57a640"}, {"pub_key": "fba402ee09ca9b71faffd70212a6a25aa57b9d72353a7f0e62a70e61ff325b68ac63039d5bf654cddcf2595961d0b0d342a13b2b31f103198bdf320259dc6166", "amount": 10, "signature": "83e237ce72a5f68c9fb87bace4aef2a025e6e6651d4f346925b71148a5c1ff725b7cc2e21b5e68f43b22da24e58aace447ee471b09d7eb0a692c88d5103543bc"}]},
+        {"txn_id": "ae1d53dc68663e84e56cdb77c2ea0c15eddaa177427e2662fc070306801005bd", "inputs": [{"txn_id": "1f7fde67c75b03ceea8d745aeb82c0ce127f667992cc710f970dc3a90abd63d4", "index": 1}], "outputs": [{"pub_key": "61626364", "amount": 5, "signature": "98a2b03835c6a0068f4bb04710314f49b8cdb45866969a35e389ff38206d17ce6fb1808c0b3080b231430e11a94b9b6db5c24bef4a68433a9bd1edbbfc2ec2de"}, {"pub_key": "fba402ee09ca9b71faffd70212a6a25aa57b9d72353a7f0e62a70e61ff325b68ac63039d5bf654cddcf2595961d0b0d342a13b2b31f103198bdf320259dc6166", "amount": 5, "signature": "71c4d43a9d9c82b1d848119da1c2d1fe80fd62590635398d05e4060239a40a36906661136f0277bfd0efc10c8cf619cbeea22fcee922af744f776869afc75cf0"}]},
+        {"txn_id": "335f9b62e474e4cb44876f249e380edad06f7a353c1323acf8fb9488f72ff8f6", "inputs": [{"txn_id": "ae1d53dc68663e84e56cdb77c2ea0c15eddaa177427e2662fc070306801005bd", "index": 1}], "outputs": [{"pub_key": "61626364", "amount": 4, "signature": "5f5155d1a28fd1d586b336b248dd83e224535e22b5ab534e3668b7d023cef9011d1c1f7ca7ed8c845c51493452e782420f08ea4d064ae7f0354f4dae2deb06ce"}, {"pub_key": "fba402ee09ca9b71faffd70212a6a25aa57b9d72353a7f0e62a70e61ff325b68ac63039d5bf654cddcf2595961d0b0d342a13b2b31f103198bdf320259dc6166", "amount": 1, "signature": "3a45b96c71c1eed88f84c1abe732c77138403b582c7e8a70549e6f17ba05419d4725a83c7f93afc1d45a0b727d25b820e4e85e40ca1051c9ca17003efccf5d1c"}]}
     ]
+
+    # bad
+    #txn_list = [
+    #    {"txn_id": "5122c29da194036aab00f4bf7f621eee7e76174451c8bc6443098c3a07fd2d83", "inputs": [{"txn_id": "06eeaf748440eccc5fe44bc53b3c032b183b57f4274361484e4fbea508ebc872", "index": 0}], "outputs": [{"pub_key": "61626364", "amount": 40, "signature": "5bee4ed879a21187296f0cb7fce8d17f2fd19f2085c09678b8843ad6760ddca3e32b2a18bb4d48b45e3f87dd631c4f5d8fa536ecfdd2bbed735e2cbb45d040cc"}, {"pub_key": "fba402ee09ca9b71faffd70212a6a25aa57b9d72353a7f0e62a70e61ff325b68ac63039d5bf654cddcf2595961d0b0d342a13b2b31f103198bdf320259dc6166", "amount": 10, "signature": "e5488af8c44712759029ca6ddcac1931a42c32936f3f9549346a346ce98c907aa39c009e3b8b4abf95d68a8c178d86523a145777e643a6a0c99d4069bfb74484"}]},
+    #    {"txn_id": "b4b531ef5c132b32cd4eaa5fbe3193edc35de8fe1a538c6b36ab3782e5d81ee2", "inputs": [{"txn_id": "5122c29da194036aab00f4bf7f621eee7e76174451c8bc6443098c3a07fd2d83", "index": 1}], "outputs": [{"pub_key": "61626364", "amount": 5, "signature": "1d80c0ca4415fadc70d8e49f3e45902f1a71b3ce1a642dc2aee240045e692fcb06614958d070afeb37d614deedfc48112417e55ef34f0d7b94dedd59b027c54d"}, {"pub_key": "fba402ee09ca9b71faffd70212a6a25aa57b9d72353a7f0e62a70e61ff325b68ac63039d5bf654cddcf2595961d0b0d342a13b2b31f103198bdf320259dc6166", "amount": 5, "signature": "b0236664094cd22c62644f3b2c319c4757d0e4f6ce6439ca4830c88ef74bed712c1c09d4afdfa79c319111d692de42bccbcf93cb5578a6539a271170a22fb594"}]},
+    #    {"txn_id": "1425210b148c3cd714c78313ab52ddfe57496418ceefa1b073b758f7a29b2bda", "inputs": [{"txn_id": "b4b531ef5c132b32cd4eaa5fbe3193edc35de8fe1a538c6b36ab3782e5d81ee2", "index": 1}], "outputs": [{"pub_key": "61626364", "amount": 10, "signature": "43d2a1f3e3bd033b55ff749dbb1efd30b02858d4085246ff71768dc44cc390b23140912067876354445ea462f50eede242eb0076e4504c9ca563c92efd92922a"}]}
+    #]
     from transaction import Transaction
     txns = [Transaction.from_json(txn_json) for txn_json in txn_list]
     global TXN_QUEUE
