@@ -1,11 +1,9 @@
-from io import DEFAULT_BUFFER_SIZE
+import os
 from dataclasses import dataclass
 from typing import List, Tuple
-import datetime
-from transaction import Transaction, TxnInput, TxnOutput, LinkedTransaction
 from chain import BlockChain
+from transaction import Transaction, TxnInput, TxnOutput, LinkedTransaction
 import crypto
-import os
 import network_util
 
 

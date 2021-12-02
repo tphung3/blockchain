@@ -87,6 +87,12 @@ def run_wallet(wallet: Wallet):
             print("List of all available peers to send coins to:")
             for peer in all_peers:
                 print(f"Name: {peer['owner']}, public key: {peer['pub_key']}")
+        
+        elif cmd == "help":
+            print("Commands:\n\tbalance\t\tview balance\n\tpeers\t\tlist peers")
+
+        elif cmd == "quit":
+            return
 
         else:
             print("invalid command:", cmd)

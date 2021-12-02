@@ -3,7 +3,6 @@ import sys
 import json
 from dataclasses import dataclass
 from typing import List
-import crypto
 import rules
 from block import Block
 from transaction import Transaction, LinkedTxnInput, LinkedTransaction
@@ -63,12 +62,13 @@ class BlockChain:
         
         return blocks
 
-    def save_block_to_file(self, block: Block) -> BlockChainNode:
-        block_file = os.path.join(self.storage_dir, str(block.level))
+    def save_block_to_file(self, block: Block) -> None:
+        block_file = os.path.join(self.storage_dir, str(block.height))
 
         with open(block_file, 'a') as stream:
-            block_str = json.dumps(Block.to_json(block)) + "\n"
+            block_str = json.dumps(Block.to_json(block))
             print(block_str, file=stream)
+            stream.flush()
 
     def previous_block_node(self, block: Block) -> BlockChainNode:
         """
