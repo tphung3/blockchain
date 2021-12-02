@@ -7,7 +7,7 @@ from copy import deepcopy
 import rules
 import crypto
 import network_util
-from chain import BlockChain
+from chain import BlockChain, BlockChainNode
 from block import Block
 from transaction import Transaction
 from wallet import Wallet
@@ -24,7 +24,7 @@ block_queue_lock = threading.Lock()
 request_queue_lock = threading.Lock()
 out_queue_lock = threading.Lock()
 
-CHAIN = BlockChain()        # modified by main – used by all
+CHAIN = None                # modified by main – used by all
 CHAIN_MODIFIED = False      # set by main – reset by miner
 
 chain_lock = threading.Lock()
@@ -42,9 +42,15 @@ def send_catalog_updates(pub_key, port, display_name):
 def run_wallet(wallet: Wallet):
     global TXN_QUEUE, OUT_QUEUE, CHAIN
 
-    while line := input("> "):
+    while True:
+        try:
+            line = input("> ")
+        except EOFError:
+            return
+
         args = line.split()
-        
+        if not args:
+            continue
         cmd = args[0].lower()
 
         if cmd == "send":
@@ -71,7 +77,7 @@ def run_wallet(wallet: Wallet):
                 continue
 
             wallet.add_pending(txn)
-            print(txn.to_json())
+            print("    TXN ID:", txn.txn_id.hex())
             
             with txn_queue_lock:
                 TXN_QUEUE.append(txn)
@@ -97,8 +103,20 @@ def run_wallet(wallet: Wallet):
             
             print("PUBKEY\t\tADDR\t\tPORT")
             for p in peers:
-                print(p.pub_key.hex()[:8], p.address, p.port, sep='\t')
+                print(p.pub_key.hex(), p.address, p.port, sep='\t')
         
+        elif cmd == "pending":
+            with chain_lock:
+                transactions = deepcopy(list(CHAIN.transactions.values()))
+            wallet.load_transactions(transactions)
+
+            pending_txns = wallet.get_pending_transactions()
+            if not pending_txns:
+                print("No pending transactions")
+                continue
+            for txn in pending_txns:
+                print('    ', txn)
+
         elif cmd == "help":
             print("Commands:\n\tbalance\t\tview balance\n\tpeers\t\tlist peers")
 
@@ -278,7 +296,7 @@ def run_network_in(network_in: network_util.IncomingNetworkInterface, display_na
     network_in.start_listening()
     
     # send catalog updates in background
-    threading.Thread(target=send_catalog_updates, args=(network_in.pub_key, network_in.port, display_name), daemon=True).start()
+    #threading.Thread(target=send_catalog_updates, args=(network_in.pub_key, network_in.port, display_name), daemon=True).start()
 
     while True:
         (conn, msg) = network_in.accept_message()
@@ -297,8 +315,8 @@ def run_network_out(network_out: network_util.OutgoingNetworkInterface):
 
 
 def run_maintainer():
-    global BLOCK_QUEUE, CHAIN_MODIFIED
-    
+    global BLOCK_QUEUE, CHAIN, CHAIN_MODIFIED
+
     while True:
         if BLOCK_QUEUE:
             with block_queue_lock:
@@ -306,12 +324,13 @@ def run_maintainer():
             
             with chain_lock:
                 if CHAIN.insert_block(block):
-                    CHAIN.logger.debug("inserting block " + block.block_data.hex())
+                    print("\nNEW BLOCK PUBLISHED\n")
+                    CHAIN.logger.debug("inserting block " + block.block_hash.hex())
                     CHAIN.save_block_to_file(block)
                     with chain_modified_lock:
                         CHAIN_MODIFIED = True
                 else:
-                    CHAIN.logger.debug("rejecting block " + block.block_data.hex())
+                    CHAIN.logger.debug("rejecting block " + block.block_hash.hex())
 
 
 def usage(status):
@@ -328,27 +347,31 @@ def main():
     pub_key = crypto.load_public_key()
     pri_key = crypto.load_private_key()
 
-    network_out = network_util.OutgoingNetworkInterface(pub_key)
-    threading.Thread(target=run_network_out, args=(network_out,), daemon=True).start()
-    
-    miner = Miner(pub_key, pri_key)
-    from transaction import Transaction
-    txn_list = [{"txn_id": "1f7fde67c75b03ceea8d745aeb82c0ce127f667992cc710f970dc3a90abd63d4", "inputs": [{"txn_id": "06eeaf748440eccc5fe44bc53b3c032b183b57f4274361484e4fbea508ebc872", "index": 0}], "outputs": [{"pub_key": "61626364", "amount": 40, "signature": "5061e1f8c8fe507381dfee844b5def68c8c570f290807032ff13b844cf4eeb15a111fa4b41b08f31e1d9bcc951f023d7aeb23d00917d6eb1f0e14a4f8b57a640"}, {"pub_key": "fba402ee09ca9b71faffd70212a6a25aa57b9d72353a7f0e62a70e61ff325b68ac63039d5bf654cddcf2595961d0b0d342a13b2b31f103198bdf320259dc6166", "amount": 10, "signature": "83e237ce72a5f68c9fb87bace4aef2a025e6e6651d4f346925b71148a5c1ff725b7cc2e21b5e68f43b22da24e58aace447ee471b09d7eb0a692c88d5103543bc"}]},{"txn_id": "ae1d53dc68663e84e56cdb77c2ea0c15eddaa177427e2662fc070306801005bd", "inputs": [{"txn_id": "1f7fde67c75b03ceea8d745aeb82c0ce127f667992cc710f970dc3a90abd63d4", "index": 1}], "outputs": [{"pub_key": "61626364", "amount": 5, "signature": "98a2b03835c6a0068f4bb04710314f49b8cdb45866969a35e389ff38206d17ce6fb1808c0b3080b231430e11a94b9b6db5c24bef4a68433a9bd1edbbfc2ec2de"}, {"pub_key": "fba402ee09ca9b71faffd70212a6a25aa57b9d72353a7f0e62a70e61ff325b68ac63039d5bf654cddcf2595961d0b0d342a13b2b31f103198bdf320259dc6166", "amount": 5, "signature": "71c4d43a9d9c82b1d848119da1c2d1fe80fd62590635398d05e4060239a40a36906661136f0277bfd0efc10c8cf619cbeea22fcee922af744f776869afc75cf0"}]},{"txn_id": "335f9b62e474e4cb44876f249e380edad06f7a353c1323acf8fb9488f72ff8f6", "inputs": [{"txn_id": "ae1d53dc68663e84e56cdb77c2ea0c15eddaa177427e2662fc070306801005bd", "index": 1}], "outputs": [{"pub_key": "61626364", "amount": 4, "signature": "5f5155d1a28fd1d586b336b248dd83e224535e22b5ab534e3668b7d023cef9011d1c1f7ca7ed8c845c51493452e782420f08ea4d064ae7f0354f4dae2deb06ce"}, {"pub_key": "fba402ee09ca9b71faffd70212a6a25aa57b9d72353a7f0e62a70e61ff325b68ac63039d5bf654cddcf2595961d0b0d342a13b2b31f103198bdf320259dc6166", "amount": 1, "signature": "3a45b96c71c1eed88f84c1abe732c77138403b582c7e8a70549e6f17ba05419d4725a83c7f93afc1d45a0b727d25b820e4e85e40ca1051c9ca17003efccf5d1c"}]}]
-    txns = [Transaction.from_json(txn_json) for txn_json in txn_list]
-    global TXN_QUEUE
-    TXN_QUEUE = txns
-    threading.Thread(target=run_miner, args=(miner,), daemon=True).start()
+    threads = []
 
-    block = Block.from_json({'hash': '0000029fe2de502979b5b1e345ff58b4c47f9f872c26999bc47752930a8a5f76', 'prev_hash': '00000e9f2fb735130801b4c31e40c3b9c6fa0789a13f8c5d685cd1602c97bafb', 'height': 1, 'nonce': 66240216508772406228315848838552293799641861242416215840665602550228984815026, 'transactions': [{'txn_id': 'adbcd37eb20dfe3cfe174358ac32c6b2da4027ea48ffd47e9af73689f4dc015f', 'inputs': [], 'outputs': [{'pub_key': 'fba402ee09ca9b71faffd70212a6a25aa57b9d72353a7f0e62a70e61ff325b68ac63039d5bf654cddcf2595961d0b0d342a13b2b31f103198bdf320259dc6166', 'amount': 50, 'signature': '108f9bdcb45f3823b78a76344fcb1c9cbfe3dbdb1fbc6869c52fd0c84ffae25f116d7253034e753171da1b0dab186cc1c0af656969379451308172a1311e5ed8'}]}, {'txn_id': '1f7fde67c75b03ceea8d745aeb82c0ce127f667992cc710f970dc3a90abd63d4', 'inputs': [{'txn_id': '06eeaf748440eccc5fe44bc53b3c032b183b57f4274361484e4fbea508ebc872', 'index': 0}], 'outputs': [{'pub_key': '61626364', 'amount': 40, 'signature': '5061e1f8c8fe507381dfee844b5def68c8c570f290807032ff13b844cf4eeb15a111fa4b41b08f31e1d9bcc951f023d7aeb23d00917d6eb1f0e14a4f8b57a640'}, {'pub_key': 'fba402ee09ca9b71faffd70212a6a25aa57b9d72353a7f0e62a70e61ff325b68ac63039d5bf654cddcf2595961d0b0d342a13b2b31f103198bdf320259dc6166', 'amount': 10, 'signature': '83e237ce72a5f68c9fb87bace4aef2a025e6e6651d4f346925b71148a5c1ff725b7cc2e21b5e68f43b22da24e58aace447ee471b09d7eb0a692c88d5103543bc'}]}, {'txn_id': 'ae1d53dc68663e84e56cdb77c2ea0c15eddaa177427e2662fc070306801005bd', 'inputs': [{'txn_id': '1f7fde67c75b03ceea8d745aeb82c0ce127f667992cc710f970dc3a90abd63d4', 'index': 1}], 'outputs': [{'pub_key': '61626364', 'amount': 5, 'signature': '98a2b03835c6a0068f4bb04710314f49b8cdb45866969a35e389ff38206d17ce6fb1808c0b3080b231430e11a94b9b6db5c24bef4a68433a9bd1edbbfc2ec2de'}, {'pub_key': 'fba402ee09ca9b71faffd70212a6a25aa57b9d72353a7f0e62a70e61ff325b68ac63039d5bf654cddcf2595961d0b0d342a13b2b31f103198bdf320259dc6166', 'amount': 5, 'signature': '71c4d43a9d9c82b1d848119da1c2d1fe80fd62590635398d05e4060239a40a36906661136f0277bfd0efc10c8cf619cbeea22fcee922af744f776869afc75cf0'}]}, {'txn_id': '335f9b62e474e4cb44876f249e380edad06f7a353c1323acf8fb9488f72ff8f6', 'inputs': [{'txn_id': 'ae1d53dc68663e84e56cdb77c2ea0c15eddaa177427e2662fc070306801005bd', 'index': 1}], 'outputs': [{'pub_key': '61626364', 'amount': 4, 'signature': '5f5155d1a28fd1d586b336b248dd83e224535e22b5ab534e3668b7d023cef9011d1c1f7ca7ed8c845c51493452e782420f08ea4d064ae7f0354f4dae2deb06ce'}, {'pub_key': 'fba402ee09ca9b71faffd70212a6a25aa57b9d72353a7f0e62a70e61ff325b68ac63039d5bf654cddcf2595961d0b0d342a13b2b31f103198bdf320259dc6166', 'amount': 1, 'signature': '3a45b96c71c1eed88f84c1abe732c77138403b582c7e8a70549e6f17ba05419d4725a83c7f93afc1d45a0b727d25b820e4e85e40ca1051c9ca17003efccf5d1c'}]}]})
-    CHAIN.insert_block(block)
+    network_out = network_util.OutgoingNetworkInterface(pub_key)
+    threads.append(threading.Thread(target=run_network_out, args=(network_out,), daemon=True))
+
+    miner = Miner(pub_key, pri_key)
+    threads.append(threading.Thread(target=run_miner, args=(miner,), daemon=True))
+
     wallet = Wallet(pub_key, pri_key)
-    threading.Thread(target=run_wallet, args=(wallet,), daemon=True).start()
+    threads.append(threading.Thread(target=run_wallet, args=(wallet,), daemon=True))
 
     network_in = network_util.IncomingNetworkInterface(pub_key)
-    threading.Thread(target=run_network_in, args=(network_in,display_name), daemon=True).start()
+    threads.append(threading.Thread(target=run_network_in, args=(network_in,display_name), daemon=True))
 
-    run_maintainer()
+    threads.append(threading.Thread(target=run_maintainer, daemon=True))
 
+    global CHAIN
+    CHAIN = BlockChain()
+    CHAIN.load_chain()
+    
+    for thread in threads:
+        thread.start()
+    
+    for thread in threads:
+        thread.join()
 
 if __name__ == "__main__":
     main()

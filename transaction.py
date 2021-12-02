@@ -165,7 +165,6 @@ class LinkedTransaction(Transaction):
         return coins
 
 
-
 if __name__ == "__main__":
     txn_in = TxnInput(b'\xe330', 0)
     txn_out = TxnOutput(b'3dbad', 50)

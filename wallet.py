@@ -1,4 +1,5 @@
 import os
+import json
 from dataclasses import dataclass
 from typing import List, Tuple
 from chain import BlockChain
@@ -7,20 +8,51 @@ import crypto
 import network_util
 
 
-DEFAULT_OUT_TXN_FILE = os.path.join(os.path.dirname(__file__), "wallet", "pending-txns.txt")
+PENDING_TXN_FILE = os.path.join(os.path.dirname(__file__), "wallet", "pending-txns.txt")
 
 
 @dataclass
 class LocalTxn:
+    txn_id: bytes
     from_pub_key: bytes
     to_pub_key: bytes
     amount: int
 
     def __repr__(self):
         if self.from_pub_key is None:
-            return f"COINBASE to {self.to_pub_key.hex()[:8]} for {self.amount}"
+            return f"{self.txn_id.hex()[:10]}\tCOINBASE to {self.to_pub_key.hex()[:8]} for {self.amount}"
         else:
-            return f"{self.from_pub_key.hex()[:8]} sent {self.to_pub_key.hex()[:8]} {self.amount}"
+            return f"{self.txn_id.hex()[:10]}\t{self.from_pub_key.hex()[:8]} sent {self.to_pub_key.hex()[:8]} {self.amount}"
+    
+    def to_json(self):
+        return {
+            "txn_id": self.txn_id.hex(),
+            "from": self.from_pub_key.hex(),
+            "to": self.to_pub_key.hex(),
+            "amount": self.amount
+        }
+    
+    @classmethod
+    def from_json(cls, json_data):
+        attrs = ('txn_id', 'from', 'to', 'amount')
+        for attr in attrs:
+            if json_data.get(attr) is None:
+                return None
+        
+        txn_id = bytes.fromhex(json_data['txn_id'])
+        from_ = bytes.fromhex(json_data['from'])
+        to_ = bytes.fromhex(json_data['to'])
+        amount = json_data['amount']
+        
+        return cls(txn_id, from_, to_, amount)
+
+    @classmethod
+    def from_linked_txn(cls, txn: LinkedTransaction):
+        txn_id = txn.txn_id
+        sender_pub_key = txn.coin_inputs()[0].pub_key
+        receiver_pub_key = txn.outputs[0].pub_key
+        amount = txn.outputs[0].amount
+        return cls(txn_id, sender_pub_key, receiver_pub_key, amount)
 
 
 @dataclass
@@ -30,25 +62,35 @@ class Balance:
 
 
 class Wallet:
-    def __init__(self, pub_key: bytes, pri_key: bytes, out_txn_file=DEFAULT_OUT_TXN_FILE):
+    def __init__(self, pub_key: bytes, pri_key: bytes, pending_txn_file=PENDING_TXN_FILE):
         self.pub_key = pub_key
         self.pri_key = pri_key
 
-        self.out_txn_file = out_txn_file
-        # create file
-        os.makedirs(os.path.dirname(out_txn_file), exist_ok=True)
-        open(out_txn_file, 'w').close()
+        self.pending_txn_file = pending_txn_file
+        self._pending_transactions: List[LocalTxn] = []
+        
+        # create if not exists
+        os.makedirs(os.path.dirname(pending_txn_file), exist_ok=True)
+        open(pending_txn_file, 'a').close()
+        with open(pending_txn_file, 'r') as stream:
+            for line in stream.readlines():
+                txn = LocalTxn.from_json(json.loads(line.strip()))
+                if txn is not None:
+                    self._pending_transactions.append(txn)
 
         self.peers: List[network_util.Peer] = []
         self.transactions: List[LinkedTransaction] = []
-        self.pending_transactions: List[LinkedTransaction] = []
     
     def find_peers(self):
         self.peers = network_util.find_peers(self.pub_key)
         return self.peers
     
     def add_pending(self, txn: LinkedTransaction):
-        self.pending_transactions.append(txn)
+        local_txn = LocalTxn.from_linked_txn(txn)
+        self._pending_transactions.append(local_txn)
+        with open(self.pending_txn_file, 'a') as stream:
+            print(json.dumps(local_txn.to_json()), file=stream)
+            stream.flush()
     
     def get_balance(self, transactions: List[LinkedTransaction]) -> Balance:
         involved_txns = []
@@ -79,18 +121,30 @@ class Wallet:
                     balance += coin.amount
             
             if involved:
-                involved_txns.append(LocalTxn(sender_pubkey, receiver_pubkey, amount))
+                involved_txns.append(LocalTxn(txn.txn_id, sender_pubkey, receiver_pubkey, amount))
         
         return Balance(involved_txns, balance)
     
     def load_transactions(self, transactions: List[LinkedTransaction]) -> None:
         self.transactions = []
 
+        pending_dict = {txn.txn_id: txn for txn in self._pending_transactions}
+
         for txn in transactions:
+            if txn.txn_id in pending_dict:
+                pending_dict.pop(txn.txn_id)
+
             for txn_out in txn.outputs:
                 if txn_out.pub_key == self.pub_key and not txn_out.spent:
                     self.transactions.append(txn)
                     break
+        
+        self._pending_transactions = list(pending_dict.values())
+
+        with open(self.pending_txn_file, 'w+') as stream:
+            for local_txn in self._pending_transactions:
+                print(json.dumps(local_txn.to_json()), file=stream)
+            stream.flush()
 
     def find_coins(self, target_amount) -> Tuple[LinkedTransaction, int]:
         tot = 0
@@ -134,9 +188,8 @@ class Wallet:
         txn.sign(self.pri_key)
         return txn
     
-    def save_out_txn(self, txn: Transaction):
-        with open(self.out_txn_file, 'a') as stream:
-            print(txn.to_json(), file=stream)
+    def get_pending_transactions(self):
+        return self._pending_transactions
 
 
 if __name__ == "__main__":
