@@ -158,7 +158,6 @@ class BlockChain:
         """
         Apply transaction to chain, linking it to its predecessor accordingly
         """
-        self.logger.debug("applying " + txn.txn_id.hex())
         linked_txn_inputs = []
         for txn_in in txn.inputs:
             assert txn_in.txn_id in self.transactions
@@ -169,7 +168,6 @@ class BlockChain:
             linked_txn_inputs.append(LinkedTxnInput.link(txn_in, linked_txn))
 
             # spend coin
-            self.logger.debug("spending " + linked_txn.txn_id.hex() + " " + str(txn_in.index))
             linked_txn.outputs[txn_in.index].spent = True
         
         for txn_out in txn.outputs:
@@ -190,12 +188,10 @@ class BlockChain:
             self.revert_transaction(txn)
     
     def revert_transaction(self, txn: Transaction) -> None:
-        self.logger.debug("reverting " + txn.txn_id.hex())
         linked_txn = self.transactions.pop(txn.txn_id)
 
         for linked_txn_in in linked_txn.inputs:
             # unspend coin
-            self.logger.debug("unspending " + linked_txn_in.txn.txn_id.hex() + " " + str(linked_txn_in.index))
             linked_txn_in.txn.outputs[linked_txn_in.index].spent = False
     
     def move_head(self, src: BlockChainNode, dst: BlockChainNode) -> BlockChainNode:

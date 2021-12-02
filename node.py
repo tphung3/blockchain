@@ -101,9 +101,9 @@ def run_wallet(wallet: Wallet):
                 print("No peers online!")
                 continue
             
-            print("PUBKEY\t\tADDR\t\tPORT")
+            print("PUBKEY\t\tNAME\t\tPORT")
             for p in peers:
-                print(p.pub_key.hex(), p.address, p.port, sep='\t')
+                print(p.pub_key.hex(), p.name, p.port, sep='\t')
         
         elif cmd == "pending":
             with chain_lock:
@@ -309,8 +309,8 @@ def run_network_out(network_out: network_util.OutgoingNetworkInterface):
         if OUT_QUEUE:
             with out_queue_lock:
                 json_data = OUT_QUEUE.pop(0)
-                network_out.logger.debug("broadcasting type " + json_data['type'])
-                network_out.broadcast(json_data)
+            network_out.logger.debug("broadcasting type " + json_data['type'])
+            network_out.broadcast(json_data)
         time.sleep(0.2)
 
 

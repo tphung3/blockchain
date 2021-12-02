@@ -18,6 +18,7 @@ TYPE = "crypto"
 class Peer:
     pub_key: bytes
     address: str
+    name: str
     port: int
     display_name: str
     lastheardfrom: float
@@ -31,7 +32,7 @@ def find_peers(my_pub_key) -> List[Peer]:
     entries = [d for d in json.loads(data) if d.get('type') == TYPE and d.get('project') == PROJECT]
     peers = dict()
 
-    attrs = ('address', 'port', 'pub_key', 'display_name', 'lastheardfrom')
+    attrs = ('address', 'name', 'port', 'pub_key', 'display_name', 'lastheardfrom')
     for entry in entries:
         if not all(map(lambda attr: entry.get(attr), attrs)):
             continue
@@ -40,6 +41,7 @@ def find_peers(my_pub_key) -> List[Peer]:
             peer = Peer(
                 bytes.fromhex(entry['pub_key']),
                 entry['address'],
+                entry['name'],
                 int(entry['port']),
                 entry['display_name'],
                 float(entry['lastheardfrom'])
@@ -176,25 +178,31 @@ class OutgoingNetworkInterface:
 
     def broadcast(self, json_data):
         self.update_connections()
-
         for (peer, conn) in self.connections.values():
-            send_json(conn, json_data)
+            if not send_json(conn, json_data):
+                self.logger.error("message to " + peer.pub_key.hex() + " failed")
     
     def update_connections(self):
+        cache = self.connections.copy()
+        self.connections = dict()
         for peer in find_peers(self.pub_key):
-            if peer.pub_key in self.connections:
+            if peer.pub_key in cache:
                 # are details the same
-                (cached_peer, conn) = self.connections[peer.pub_key]
+                (cached_peer, conn) = cache[peer.pub_key]
                 if peer.address == cached_peer.address and cached_peer.port == peer.port:
                     continue
 
             try:
+                self.logger.debug("connecting to " + peer.pub_key.hex() + "(name=" + peer.name + ", port=" + str(peer.port) + ")")
                 conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                conn.connect((peer.address, peer.port))
+                conn.settimeout(1.0)
+                conn.connect((peer.name, peer.port))
+                conn.setblocking(False)
                 self.connections[peer.pub_key] = (peer, conn)
-            except (TimeoutError, InterruptedError, ConnectionRefusedError):
+                self.logger.debug("successfully connected to " + peer.pub_key.hex())
+            except (socket.timeout, TimeoutError, InterruptedError, ConnectionRefusedError):
+                self.logger.debug("failed to connect to " + peer.pub_key.hex())
                 continue
-
 
 if __name__ == "__main__":
     peers = find_peers(None)
