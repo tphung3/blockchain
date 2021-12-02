@@ -2,12 +2,12 @@ import os
 from dataclasses import dataclass
 from typing import List, Tuple
 from chain import BlockChain
-from transaction import Transaction, TxnInput, TxnOutput, LinkedTransaction
+from transaction import Transaction, TxnInput, TxnOutput, LinkedTransaction, LinkedTxnInput
 import crypto
 import network_util
 
 
-DEFAULT_OUT_TXN_FILE = os.path.join(os.path.dirname(__file__), "wallet", "outgoing-txns.txt")
+DEFAULT_OUT_TXN_FILE = os.path.join(os.path.dirname(__file__), "wallet", "pending-txns.txt")
 
 
 @dataclass
@@ -41,10 +41,14 @@ class Wallet:
 
         self.peers: List[network_util.Peer] = []
         self.transactions: List[LinkedTransaction] = []
+        self.pending_transactions: List[LinkedTransaction] = []
     
     def find_peers(self):
         self.peers = network_util.find_peers()
         return self.peers
+    
+    def add_pending(self, txn: LinkedTransaction):
+        self.pending_transactions.append(txn)
     
     def get_balance(self, transactions: List[LinkedTransaction]) -> Balance:
         involved_txns = []
@@ -119,14 +123,14 @@ class Wallet:
         inputs = []
         for (txn, i) in txns:
             tot += txn.outputs[i].amount
-            inputs.append(TxnInput(txn.txn_id, i))
+            inputs.append(LinkedTxnInput(txn, txn.txn_id, i))
         
         outputs = [TxnOutput(target_pub_key, target_amount)]
         rem = tot - target_amount
         if rem > 0:
             outputs.append(TxnOutput(self.pub_key, rem))
         
-        txn = Transaction(inputs, outputs)
+        txn = LinkedTransaction(inputs, outputs)
         txn.sign(self.pri_key)
         return txn
     

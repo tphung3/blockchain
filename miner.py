@@ -1,7 +1,7 @@
 from random import randint
 import crypto
 from rules import valid_block_hash, MINING_REWARD
-from utils import bytes_to_bits
+from utils import bytes_to_bits, get_logger
 from block import Block
 from transaction import Transaction, TxnInput, TxnOutput
 
@@ -17,11 +17,12 @@ class Miner:
         self.pri_key = pri_key
         self.strategy = strategy
 
+        self.logger = get_logger()
         self.pending_txns = []
         
         # INCREMENT strategy
         self.i = 0
-
+    
     def add_pending_txn(self, txn: Transaction):
         self.pending_txns.append(txn)
     

@@ -153,12 +153,12 @@ class BlockChain:
             linked_txn = self.transactions[txn_in.txn_id]
 
             # link to incoming txn object
-            linked_txn_inputs.append(LinkedTxnInput(txn_in).link(linked_txn))
+            linked_txn_inputs.append(LinkedTxnInput.link(txn_in, linked_txn))
 
             # spend coin
             linked_txn.outputs[txn_in.index].spent = True
         
-        linked_txn = LinkedTransaction(txn).link_inputs(linked_txn_inputs)
+        linked_txn = LinkedTransaction.link(txn, linked_txn_inputs)
         self.transactions[linked_txn.txn_id] = linked_txn
 
     def revert_block(self, block_node: BlockChainNode) -> None:

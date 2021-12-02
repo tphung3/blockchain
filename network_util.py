@@ -1,8 +1,10 @@
 import json
 import struct
 import socket
-from dataclasses import dataclass
 import http.client
+from dataclasses import dataclass
+from typing import List
+from utils import get_logger
 
 
 BUFSIZ = 1024
@@ -21,7 +23,7 @@ class Peer:
     lastheardfrom: float
 
 
-def find_peers():
+def find_peers() -> List[Peer]:
     conn = http.client.HTTPConnection(*CATALOG_SERVER)
     conn.request("GET", "/query.json")
     data = conn.getresponse().read()
@@ -54,17 +56,17 @@ def find_peers():
 
     conn.close()
     
-    return peers.values()
+    return list(peers.values())
 
 
-def send_catalog_update(pubkey, port, display_name, type_=TYPE, project=PROJECT, netid=NETID):
+def send_catalog_update(pubkey: bytes, port: int, display_name: str, type_: str=TYPE, project: str=PROJECT, netid: str=NETID):
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     data = json.dumps({
         "type": type_,
         "owner": netid,
         "port": port,
         "project": project,
-        "pub_key": pubkey,
+        "pub_key": pubkey.hex(),
         "display_name": display_name
     }).encode()
     s.sendto(data, CATALOG_SERVER)
@@ -140,3 +142,52 @@ def rec_int(s):
     # recover endianness from network standard
     return struct.unpack("!i", val)[0]
 
+
+class IncomingNetworkInterface:
+    def __init__(self, pub_key):
+        self.pub_key = pub_key
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.port = 0
+
+        self.logger = get_logger()
+    
+    def start_listening(self):
+        self.socket.bind(('', 0))
+        _, self.port = self.socket.getsockname()
+
+        self.socket.listen(8)
+        self.logger.debug("Listening on port " + str(self.port))
+    
+    def accept_message(self):
+        conn = self.socket.accept()
+        message = rec_json(conn)
+        return (conn, message)
+
+
+class OutgoingNetworkInterface:
+    def __init__(self):
+        self.connections = dict()
+        self.peers = find_peers()
+
+        self.logger = get_logger()
+
+    def broadcast(self, json_data):
+        self.update_connections()
+
+        for (peer, conn) in self.connections.values():
+            send_json(conn, json_data)
+    
+    def update_connections(self):
+        for peer in self.peers:
+            if peer.pub_key in self.connections:
+                # are details the same
+                (cached_peer, conn) = self.connections[peer.pub_key]
+                if peer.address == cached_peer.address and cached_peer.port == peer.port:
+                    continue
+
+            try:
+                conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                conn.connect((peer.address, peer.port))
+                self.connections[peer.pub_key] = (peer, conn)
+            except (TimeoutError, InterruptedError, ConnectionRefusedError):
+                continue

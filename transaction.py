@@ -138,25 +138,25 @@ class Transaction(Serializable):
 
 
 class LinkedTxnInput(TxnInput):
-    def __init__(self, txn_in: TxnInput):
-        self.txn = None
-        self.txn_id = txn_in.txn_id
-        self.index = txn_in.index
+    def __init__(self, txn: 'LinkedTransaction', txn_id: bytes, index: int):
+        self.txn = txn
+        self.txn_id = txn_id
+        self.index = index
     
-    def link(self, txn_in: 'LinkedTransaction'):
-        self.txn = txn_in
-        return self
+    @classmethod
+    def link(cls, txn_in: TxnInput, txn: 'LinkedTransaction'):
+        return cls(txn, txn_in.txn_id, txn_in.index)
 
 
 class LinkedTransaction(Transaction):
-    def __init__(self, txn: Transaction):
-        self.txn_id = txn.txn_id
-        self.inputs = []
-        self.outputs = txn.outputs
-    
-    def link_inputs(self, inputs: List[LinkedTxnInput]):
+    def __init__(self, inputs: List[LinkedTxnInput], outputs: List[TxnOutput], txn_id: bytes = None):
         self.inputs = inputs
-        return self
+        self.outputs = outputs
+        self.txn_id = txn_id
+    
+    @classmethod
+    def link(cls, txn: Transaction, inputs: List[LinkedTxnInput]):
+        return cls(inputs, txn.outputs, txn.txn_id)
     
     def coin_inputs(self) -> List[TxnOutput]:
         coins = []
