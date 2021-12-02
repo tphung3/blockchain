@@ -4,6 +4,7 @@ import json
 from dataclasses import dataclass
 from typing import List
 import rules
+from utils import get_logger
 from block import Block
 from transaction import Transaction, LinkedTxnInput, LinkedTransaction
 
@@ -25,15 +26,17 @@ class BlockChain:
         self.transactions = dict()   # txn_id -> LinkedTransaction
 
         self.max_height = 0
+        
+        self.logger = get_logger()
 
         # load genesis block
         genesis_level = self.load_block_file(0)
         if not genesis_level:
-            print("Invalid/Missing Genesis Block", file=sys.stderr)
+            self.logger.error("Invalid/Missing Genesis Block")
 
         self.head_block = genesis_level[0]
         if not self.insert_block(self.head_block):
-            print("Invalid Genesis Block", file=sys.stderr)
+            self.logger.error("Invalid Genesis Block")
     
     def load_block_file(self, level: int) -> List[Block]:
         """
@@ -51,13 +54,13 @@ class BlockChain:
                 block_json = json.loads(line.strip())
                 block = Block.from_json(block_json)
                 if block is None:
-                    print(f'invalid block on line {i} of {block_file}', file=sys.stderr)
+                    self.logger.error(f'invalid block on line {i} of {block_file}', file=sys.stderr)
                     continue
                 blocks.append(block)
         
         if level == 0 and len(blocks) != 1:
             # incorrect number of genesis blocks
-            print(f'{block_file} has the incorrect number of blocks for a genesis block', file=sys.stderr)
+            self.logger.error(f'{block_file} has the incorrect number of blocks for a genesis block', file=sys.stderr)
             return None
         
         return blocks
@@ -186,15 +189,15 @@ class BlockChain:
 
         # revert back to LCA
         while src.data.height > dst.data.height:
-            self.revert_block(src.data)
+            self.revert_block(src)
             src = src.prev
         while dst.data.height > src.data.height:
-            to_apply.append(dst.data)
+            to_apply.append(dst)
             dst = dst.prev
 
         while src.data.block_hash != dst.data.block_hash and src and dst:
-            self.revert_block(src.data)
-            to_apply.append(dst.data)
+            self.revert_block(src)
+            to_apply.append(dst)
             src = src.prev
             dst = dst.prev
 
@@ -207,21 +210,21 @@ class BlockChain:
 
     def verify_block(self, block: Block) -> bool:
         if block.height < 0:
-            print('invalid block height', file=sys.stderr)
+            self.logger.warn('invalid block height', file=sys.stderr)
             return False
         
         h = block.compute_hash()
 
         if block.block_hash != h:
-            print('incorrect hash', file=sys.stderr)
+            self.logger.warn('incorrect hash', file=sys.stderr)
             return False
 
         if not rules.valid_block_hash(h):
-            print('invalid hash', file=sys.stderr)
+            self.logger.warn('invalid hash', file=sys.stderr)
             return False
 
         if len(block.transactions) < 1:
-            print('no transactions', file=sys.stderr)
+            self.logger.warn('no transactions', file=sys.stderr)
             return False
         
         invalid_txns = False
@@ -232,7 +235,7 @@ class BlockChain:
             is_coinbase = (i == 0)
 
             if not self.verify_transaction(txn, is_coinbase):
-                print('unable to verify transaction', file=sys.stderr)
+                self.logger.warn('unable to verify transaction', file=sys.stderr)
                 invalid_txns = True
                 break
             
@@ -251,11 +254,11 @@ class BlockChain:
 
     def verify_transaction(self, txn: Transaction, is_coinbase: bool = False) -> bool:
         if txn.txn_id in self.transactions:
-            print('duplicate transaction', file=sys.stderr)
+            self.logger.warn('duplicate transaction', file=sys.stderr)
             return False
         
         if txn.txn_id != txn.compute_txn_id():
-            print('invalid hash', file=sys.stderr)
+            self.logger.warn('invalid hash', file=sys.stderr)
             return False
         
         sender_pubkey = None
@@ -263,20 +266,19 @@ class BlockChain:
 
         if is_coinbase:
             if len(txn.inputs) != 0 or len(txn.outputs) != 1:
-                print('invalid coinbase', file=sys.stderr)
+                self.logger.warn('invalid coinbase', file=sys.stderr)
                 return False
             sender_pubkey = txn.outputs[0].pub_key
         
         for txn_in in txn.inputs:
             if txn_in.txn_id not in self.transactions:
-                print(list(self.transactions.values())[0].txn_id.hex())
-                print('incoming txn does not exist', file=sys.stderr)
+                self.logger.warn('incoming txn does not exist', file=sys.stderr)
                 return False
             
             prev_txn = self.transactions[txn_in.txn_id]
 
             if txn_in.index < 0 or txn_in.index >= len(prev_txn.outputs):
-                print('invalid index', file=sys.stderr)
+                self.logger.warn('invalid index', file=sys.stderr)
                 return False
             
             prev_coin = prev_txn.outputs[txn_in.index]
@@ -284,11 +286,11 @@ class BlockChain:
             if sender_pubkey is None:
                 sender_pubkey = prev_coin.pub_key
             elif sender_pubkey != prev_coin.pub_key:
-                print('all incoming not from same peer', file=sys.stderr)
+                self.logger.warn('all incoming not from same peer', file=sys.stderr)
                 return False
             
             if prev_coin.spent:
-                print('coin already spent', file=sys.stderr)
+                self.logger.warn('coin already spent', file=sys.stderr)
                 return False
 
             in_tot += prev_coin.amount
@@ -296,17 +298,17 @@ class BlockChain:
         out_tot = 0
         for out_txn in txn.outputs:
             if out_txn.amount < 0:
-                print('invalid amount', file=sys.stderr)
+                self.logger.warn('invalid amount', file=sys.stderr)
                 return False
             
             out_tot += out_txn.amount
         
         if not is_coinbase and in_tot != out_tot:
-            print('mismatching amounts', file=sys.stderr)
+            self.logger.warn('mismatching amounts', file=sys.stderr)
             return False
         
         if not txn.verify_signature(sender_pubkey):
-            print('invalid signature', file=sys.stderr)
+            self.logger.warn('invalid signature', file=sys.stderr)
             return False
         
         return True

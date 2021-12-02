@@ -44,7 +44,7 @@ class Wallet:
         self.pending_transactions: List[LinkedTransaction] = []
     
     def find_peers(self):
-        self.peers = [p for p in network_util.find_peers() if p.pub_key != self.pub_key]
+        self.peers = network_util.find_peers(self.pub_key)
         return self.peers
     
     def add_pending(self, txn: LinkedTransaction):

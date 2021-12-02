@@ -296,6 +296,24 @@ def run_network_out(network_out: network_util.OutgoingNetworkInterface):
         time.sleep(0.2)
 
 
+def run_maintainer():
+    global BLOCK_QUEUE, CHAIN_MODIFIED
+    
+    while True:
+        if BLOCK_QUEUE:
+            with block_queue_lock:
+                block = BLOCK_QUEUE.pop(0)
+            
+            with chain_lock:
+                if CHAIN.insert_block(block):
+                    CHAIN.logger.debug("inserting block " + block.block_data.hex())
+                    CHAIN.save_block_to_file(block)
+                    with chain_modified_lock:
+                        CHAIN_MODIFIED = True
+                else:
+                    CHAIN.logger.debug("rejecting block " + block.block_data.hex())
+
+
 def usage(status):
     print(f"{sys.argv[0]} DISPLAY_NAME")
     sys.exit(status)
@@ -310,7 +328,7 @@ def main():
     pub_key = crypto.load_public_key()
     pri_key = crypto.load_private_key()
 
-    network_out = network_util.OutgoingNetworkInterface()
+    network_out = network_util.OutgoingNetworkInterface(pub_key)
     threading.Thread(target=run_network_out, args=(network_out,), daemon=True).start()
     
     miner = Miner(pub_key, pri_key)
@@ -327,7 +345,9 @@ def main():
     threading.Thread(target=run_wallet, args=(wallet,), daemon=True).start()
 
     network_in = network_util.IncomingNetworkInterface(pub_key)
-    run_network_in(network_in, display_name)
+    threading.Thread(target=run_network_in, args=(network_in,display_name), daemon=True).start()
+
+    run_maintainer()
 
 
 if __name__ == "__main__":

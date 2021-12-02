@@ -23,7 +23,7 @@ class Peer:
     lastheardfrom: float
 
 
-def find_peers() -> List[Peer]:
+def find_peers(my_pub_key) -> List[Peer]:
     conn = http.client.HTTPConnection(*CATALOG_SERVER)
     conn.request("GET", "/query.json")
     data = conn.getresponse().read()
@@ -45,6 +45,9 @@ def find_peers() -> List[Peer]:
                 float(entry['lastheardfrom'])
             )
         except (ValueError, KeyError):
+            continue
+        
+        if peer.pub_key == my_pub_key:
             continue
 
         pub_key = entry['pub_key']
@@ -166,10 +169,9 @@ class IncomingNetworkInterface:
 
 
 class OutgoingNetworkInterface:
-    def __init__(self):
+    def __init__(self, pub_key):
+        self.pub_key = pub_key
         self.connections = dict()
-        self.peers = find_peers()
-
         self.logger = get_logger()
 
     def broadcast(self, json_data):
@@ -179,7 +181,7 @@ class OutgoingNetworkInterface:
             send_json(conn, json_data)
     
     def update_connections(self):
-        for peer in self.peers:
+        for peer in find_peers(self.pub_key):
             if peer.pub_key in self.connections:
                 # are details the same
                 (cached_peer, conn) = self.connections[peer.pub_key]
@@ -195,7 +197,7 @@ class OutgoingNetworkInterface:
 
 
 if __name__ == "__main__":
-    peers = find_peers()
+    peers = find_peers(None)
     print("PUBKEY\t\tADDR\t\tPORT")
     for p in peers:
         print(p.pub_key.hex()[:8], p.address, p.port, sep='\t')
