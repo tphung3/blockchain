@@ -44,7 +44,7 @@ def send_catalog_updates(pub_key, port):
 
 
 def run_wallet(wallet: Wallet):
-    global TXN_QUEUE, OUT_QUEUE
+    global TXN_QUEUE, OUT_QUEUE, CHAIN
 
     while line := input("> "):
         args = line.split()
@@ -203,8 +203,9 @@ def run_miner(miner: Miner):
         find_nonce(miner, chain, pool, used)
 
 
-           
 def run_network(main_socket):
+    global OUT_QUEUE
+
     #get all peers' information before doing anything else
     all_peers = network_util.find_peers()
 
@@ -266,6 +267,8 @@ def handle_out_request(out_sockets, out_req):
 
 #handle 3 types of incoming requests: transactions, blocks, and request blocks
 def handle_request(req):
+    global BLOCK_QUEUE, TXN_QUEUE 
+
     request_type = req.get("type", None)
     if request_type == "block":
         with block_queue_lock:
@@ -308,7 +311,7 @@ class ChainServer:
         # send catalog updates in background
         threading.Thread(target=send_catalog_updates, args=(self.pub_key, self.port), daemon=True).start()
 
-        #send network interface in background
+        #run network interface in background
         threading.Thread(target=run_network, args=(self.socket), daemon=True).start()
 
 
