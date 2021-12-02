@@ -28,31 +28,32 @@ def find_peers() -> List[Peer]:
     conn.request("GET", "/query.json")
     data = conn.getresponse().read()
 
-    entries = [d for d in json.loads(data) if d.get('type') == PROJECT]
+    entries = [d for d in json.loads(data) if d.get('type') == TYPE and d.get('project') == PROJECT]
     peers = dict()
 
     attrs = ('address', 'port', 'pub_key', 'display_name', 'lastheardfrom')
     for entry in entries:
-        for attr in attrs:
-            if entry.get(attr) is None:
-                continue
+        if not all(map(lambda attr: entry.get(attr), attrs)):
+            continue
+
+        try:
+            peer = Peer(
+                bytes.fromhex(entry['pub_key']),
+                entry['address'],
+                int(entry['port']),
+                entry['display_name'],
+                float(entry['lastheardfrom'])
+            )
+        except (ValueError, KeyError):
+            continue
 
         pub_key = entry['pub_key']
-
+        
         if pub_key in peers:
             if entry['lastheardfrom'] > peers[pub_key].lastheardfrom:
-                try:
-                    peers[pub_key] = Peer(
-                        bytes.fromhex(entry['pub_key']),
-                        entry['address'],
-                        int(entry['port']),
-                        entry['display_name'],
-                        float(entry['lastheardfrom'])
-                    )
-                except ValueError:
-                    continue
+                peers[pub_key] = peer
         else:
-            peers[pub_key] = entry
+            peers[pub_key] = peer
 
     conn.close()
     
@@ -191,3 +192,10 @@ class OutgoingNetworkInterface:
                 self.connections[peer.pub_key] = (peer, conn)
             except (TimeoutError, InterruptedError, ConnectionRefusedError):
                 continue
+
+
+if __name__ == "__main__":
+    peers = find_peers()
+    print("PUBKEY\t\tADDR\t\tPORT")
+    for p in peers:
+        print(p.pub_key.hex()[:8], p.address, p.port, sep='\t')

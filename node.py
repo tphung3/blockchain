@@ -90,10 +90,14 @@ def run_wallet(wallet: Wallet):
             print("Balance:", balance.total)
 
         elif cmd == "peers":
-            all_peers = network_util.find_peers()
-            print("List of all available peers to send coins to:")
-            for peer in all_peers:
-                print(f"Name: {peer['owner']}, public key: {peer['pub_key']}")
+            peers = wallet.find_peers()
+            if not peers:
+                print("No peers online!")
+                continue
+            
+            print("PUBKEY\t\tADDR\t\tPORT")
+            for p in peers:
+                print(p.pub_key.hex()[:8], p.address, p.port, sep='\t')
         
         elif cmd == "help":
             print("Commands:\n\tbalance\t\tview balance\n\tpeers\t\tlist peers")
@@ -165,7 +169,7 @@ def find_nonce(miner: Miner, chain: BlockChain, pool: list, used: list):
 
     chain_head = chain.head_block.data
     block = miner.compose_block(chain_head.block_hash, chain_head.height + 1)
-    
+
     miner.first_nonce()
     while nonce := miner.next_nonce():
         if miner.valid_nonce(block, nonce):
