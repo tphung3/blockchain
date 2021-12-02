@@ -33,7 +33,7 @@ class Wallet:
         os.makedirs(os.path.dirname(out_txn_file), exist_ok=True)
         open(out_txn_file, 'w').close()
 
-        self.peers = []     # 
+        self.peers = []
         self.transactions: List[Transaction] = []
 
     
@@ -101,9 +101,28 @@ if __name__ == "__main__":
     wallet = Wallet(pub_key, pri_key)
     wallet.load_transactions(chain.head_block.data.transactions)
 
+    # send abcd 40 coins
     txn1 = wallet.create_txn(b'abcd', 40)
-    txn2 = wallet.create_txn(b'abcd', 5)
-    txn3 = wallet.create_txn(b'abcd', 4)
+
+    # send abcd 5 coins
+    txn2_in = [TxnInput(txn1.txn_id, 1)]
+    txn2_out = [TxnOutput(b'abcd', 5), TxnOutput(pub_key, 5)]
+    txn2 = Transaction(txn2_in, txn2_out)
+    txn2.sign(pri_key)
+
+    # send abcd 4 coins
+    txn3_in = [TxnInput(txn2.txn_id, 1)]
+    txn3_out = [TxnOutput(b'abcd', 4), TxnOutput(pub_key, 1)]
+    txn3 = Transaction(txn3_in, txn3_out)
+    txn3.sign(pri_key)
+
+    # add to chain
+    chain.apply_transaction(txn1)
+    chain.apply_transaction(txn2)
+    chain.apply_transaction(txn3)
+
+    wallet2 = Wallet(b'abcd', b'')
+    wallet2.load_transactions(chain.head_block.data.transactions)
 
     import json
     print(json.dumps(txn1.to_json()))
