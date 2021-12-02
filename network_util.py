@@ -1,6 +1,7 @@
 import json
 import struct
 import socket
+from dataclasses import dataclass
 import http.client
 
 
@@ -11,6 +12,15 @@ PROJECT = "nd-coin"
 TYPE = "crypto"
 
 
+@dataclass
+class Peer:
+    pub_key: bytes
+    address: str
+    port: int
+    display_name: str
+    lastheardfrom: float
+
+
 def find_peers():
     conn = http.client.HTTPConnection(*CATALOG_SERVER)
     conn.request("GET", "/query.json")
@@ -19,7 +29,7 @@ def find_peers():
     entries = [d for d in json.loads(data) if d.get('type') == PROJECT]
     peers = dict()
 
-    attrs = ('type', 'owner', 'port', 'project', 'pub_key')
+    attrs = ('address', 'port', 'pub_key', 'display_name', 'lastheardfrom')
     for entry in entries:
         for attr in attrs:
             if entry.get(attr) is None:
@@ -28,8 +38,17 @@ def find_peers():
         pub_key = entry['pub_key']
 
         if pub_key in peers:
-            if entry['lastheardfrom'] > peers[pub_key]['lastheardfrom']:
-                peers[pub_key] = entry
+            if entry['lastheardfrom'] > peers[pub_key].lastheardfrom:
+                try:
+                    peers[pub_key] = Peer(
+                        bytes.fromhex(entry['pub_key']),
+                        entry['address'],
+                        int(entry['port']),
+                        entry['display_name'],
+                        float(entry['lastheardfrom'])
+                    )
+                except ValueError:
+                    continue
         else:
             peers[pub_key] = entry
 
@@ -38,14 +57,15 @@ def find_peers():
     return peers.values()
 
 
-def send_catalog_update(pubkey, port, type_=TYPE, project=PROJECT, netid=NETID):
+def send_catalog_update(pubkey, port, display_name, type_=TYPE, project=PROJECT, netid=NETID):
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     data = json.dumps({
         "type": type_,
         "owner": netid,
         "port": port,
         "project": project,
-        "pub_key": pubkey
+        "pub_key": pubkey,
+        "display_name": display_name
     }).encode()
     s.sendto(data, CATALOG_SERVER)
     s.close()

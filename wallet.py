@@ -2,9 +2,11 @@ from io import DEFAULT_BUFFER_SIZE
 from dataclasses import dataclass
 from typing import List, Tuple
 import datetime
-from transaction import Transaction, TxnInput, TxnOutput
+from transaction import Transaction, TxnInput, TxnOutput, LinkedTransaction
+from chain import BlockChain
 import crypto
 import os
+import network_util
 
 
 DEFAULT_OUT_TXN_FILE = os.path.join(os.path.dirname(__file__), "wallet", "outgoing-txns.txt")
@@ -12,15 +14,21 @@ DEFAULT_OUT_TXN_FILE = os.path.join(os.path.dirname(__file__), "wallet", "outgoi
 
 @dataclass
 class LocalTxn:
-    txn: Transaction
-    timestamp: datetime.datetime
+    from_pub_key: bytes
+    to_pub_key: bytes
+    amount: int
+
+    def __repr__(self):
+        if self.from_pub_key is None:
+            return f"COINBASE to {self.to_pub_key.hex()[:8]} for {self.amount}"
+        else:
+            return f"{self.from_pub_key.hex()[:8]} sent {self.to_pub_key.hex()[:8]} {self.amount}"
 
 
 @dataclass
-class Peer:
-    pub_key: bytes
-    display_name: str
-
+class Balance:
+    involved_txns: List[LocalTxn]
+    total: int
 
 
 class Wallet:
@@ -33,18 +41,56 @@ class Wallet:
         os.makedirs(os.path.dirname(out_txn_file), exist_ok=True)
         open(out_txn_file, 'w').close()
 
-        self.peers = []
-        self.transactions: List[Transaction] = []
-
+        self.peers: List[network_util.Peer] = []
+        self.transactions: List[LinkedTransaction] = []
     
-    def load_transactions(self, transactions: List[Transaction]) -> None:
+    def find_peers(self):
+        self.peers = network_util.find_peers()
+        return self.peers
+    
+    def get_balance(self, transactions: List[LinkedTransaction]) -> Balance:
+        involved_txns = []
+        balance = 0
+
+        for txn in transactions:
+            involved = False
+
+            sender_pubkey = None
+            receiver_pubkey = None
+            amount = 0
+            
+            for coin in txn.coin_inputs():
+                sender_pubkey = coin.pub_key
+                
+                if coin.pub_key == self.pub_key:
+                    involved = True
+            
+            for coin in txn.outputs:
+                if coin.pub_key != sender_pubkey:
+                    receiver_pubkey = coin.pub_key
+                    amount = coin.amount
+            
+                if coin.pub_key == self.pub_key:
+                    involved = True
+                
+                if coin.pub_key == self.pub_key and not coin.spent:
+                    balance += coin.amount
+            
+            if involved:
+                involved_txns.append(LocalTxn(sender_pubkey, receiver_pubkey, amount))
+        
+        return Balance(involved_txns, balance)
+    
+    def load_transactions(self, transactions: List[LinkedTransaction]) -> None:
+        self.transactions = []
+
         for txn in transactions:
             for txn_out in txn.outputs:
-                if txn_out.pub_key == self.pub_key:
+                if txn_out.pub_key == self.pub_key and not txn_out.spent:
                     self.transactions.append(txn)
                     break
 
-    def find_coins(self, target_amount) -> Tuple[Transaction, int]:
+    def find_coins(self, target_amount) -> Tuple[LinkedTransaction, int]:
         tot = 0
         in_txns = []
 

@@ -137,6 +137,35 @@ class Transaction(Serializable):
         return crypto.double_sha256(data)
 
 
+class LinkedTxnInput(TxnInput):
+    def __init__(self, txn_in: TxnInput):
+        self.txn = None
+        self.txn_id = txn_in.txn_id
+        self.index = txn_in.index
+    
+    def link(self, txn_in: 'LinkedTransaction'):
+        self.txn = txn_in
+        return self
+
+
+class LinkedTransaction(Transaction):
+    def __init__(self, txn: Transaction):
+        self.txn_id = txn.txn_id
+        self.inputs = []
+        self.outputs = txn.outputs
+    
+    def link_inputs(self, inputs: List[LinkedTxnInput]):
+        self.inputs = inputs
+        return self
+    
+    def coin_inputs(self) -> List[TxnOutput]:
+        coins = []
+        for txn_in in self.inputs:
+            coins.append(txn_in.txn.outputs[txn_in.index])
+        return coins
+
+
+
 if __name__ == "__main__":
     txn_in = TxnInput(b'\xe330', 0)
     txn_out = TxnOutput(b'3dbad', 50)

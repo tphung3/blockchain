@@ -54,10 +54,17 @@ def run_wallet(wallet: Wallet):
         if cmd == "send":
             pubkey = bytes.fromhex(args[1].lower())
             amount = int(args[2])
+            with chain_lock:
+                transactions = deepcopy(list(CHAIN.transactions.values()))
+            
+            wallet.load_transactions(transactions)
             txn = wallet.create_txn(pubkey, amount)
 
             if txn is None:
                 print("failed")
+                continue
+            
+            print(txn.to_json())
             
             with txn_queue_lock:
                 TXN_QUEUE.append(txn)
@@ -65,13 +72,18 @@ def run_wallet(wallet: Wallet):
                 OUT_QUEUE.append(txn.to_message())
         
         elif cmd == "balance":
-            pass
+            with chain_lock:
+                transactions = deepcopy(list(CHAIN.transactions.values()))
+            
+            balance = wallet.get_balance(transactions)
 
-        elif cmd == "history":
-            pass
+            for txn in balance.involved_txns:
+                print('   ', txn)
+            
+            print("Balance:", balance.total)
 
         elif cmd == "peers":
-            all_peers = network_util.get_peers()
+            all_peers = network_util.find_peers()
             print("List of all available peers to send coins to:")
             for peer in all_peers:
                 print(f"Name: {peer['owner']}, public key: {peer['pub_key']}")
@@ -312,39 +324,26 @@ def main():
     import crypto
     pub_key = crypto.load_public_key()
     pri_key = crypto.load_private_key()
+
+    """
     miner = Miner(pub_key, pri_key)
-
-    # good
-    txn_list = [
-        {"txn_id": "1f7fde67c75b03ceea8d745aeb82c0ce127f667992cc710f970dc3a90abd63d4", "inputs": [{"txn_id": "06eeaf748440eccc5fe44bc53b3c032b183b57f4274361484e4fbea508ebc872", "index": 0}], "outputs": [{"pub_key": "61626364", "amount": 40, "signature": "5061e1f8c8fe507381dfee844b5def68c8c570f290807032ff13b844cf4eeb15a111fa4b41b08f31e1d9bcc951f023d7aeb23d00917d6eb1f0e14a4f8b57a640"}, {"pub_key": "fba402ee09ca9b71faffd70212a6a25aa57b9d72353a7f0e62a70e61ff325b68ac63039d5bf654cddcf2595961d0b0d342a13b2b31f103198bdf320259dc6166", "amount": 10, "signature": "83e237ce72a5f68c9fb87bace4aef2a025e6e6651d4f346925b71148a5c1ff725b7cc2e21b5e68f43b22da24e58aace447ee471b09d7eb0a692c88d5103543bc"}]},
-        {"txn_id": "ae1d53dc68663e84e56cdb77c2ea0c15eddaa177427e2662fc070306801005bd", "inputs": [{"txn_id": "1f7fde67c75b03ceea8d745aeb82c0ce127f667992cc710f970dc3a90abd63d4", "index": 1}], "outputs": [{"pub_key": "61626364", "amount": 5, "signature": "98a2b03835c6a0068f4bb04710314f49b8cdb45866969a35e389ff38206d17ce6fb1808c0b3080b231430e11a94b9b6db5c24bef4a68433a9bd1edbbfc2ec2de"}, {"pub_key": "fba402ee09ca9b71faffd70212a6a25aa57b9d72353a7f0e62a70e61ff325b68ac63039d5bf654cddcf2595961d0b0d342a13b2b31f103198bdf320259dc6166", "amount": 5, "signature": "71c4d43a9d9c82b1d848119da1c2d1fe80fd62590635398d05e4060239a40a36906661136f0277bfd0efc10c8cf619cbeea22fcee922af744f776869afc75cf0"}]},
-        {"txn_id": "335f9b62e474e4cb44876f249e380edad06f7a353c1323acf8fb9488f72ff8f6", "inputs": [{"txn_id": "ae1d53dc68663e84e56cdb77c2ea0c15eddaa177427e2662fc070306801005bd", "index": 1}], "outputs": [{"pub_key": "61626364", "amount": 4, "signature": "5f5155d1a28fd1d586b336b248dd83e224535e22b5ab534e3668b7d023cef9011d1c1f7ca7ed8c845c51493452e782420f08ea4d064ae7f0354f4dae2deb06ce"}, {"pub_key": "fba402ee09ca9b71faffd70212a6a25aa57b9d72353a7f0e62a70e61ff325b68ac63039d5bf654cddcf2595961d0b0d342a13b2b31f103198bdf320259dc6166", "amount": 1, "signature": "3a45b96c71c1eed88f84c1abe732c77138403b582c7e8a70549e6f17ba05419d4725a83c7f93afc1d45a0b727d25b820e4e85e40ca1051c9ca17003efccf5d1c"}]}
-    ]
-
-    # bad
-    #txn_list = [
-    #    {"txn_id": "5122c29da194036aab00f4bf7f621eee7e76174451c8bc6443098c3a07fd2d83", "inputs": [{"txn_id": "06eeaf748440eccc5fe44bc53b3c032b183b57f4274361484e4fbea508ebc872", "index": 0}], "outputs": [{"pub_key": "61626364", "amount": 40, "signature": "5bee4ed879a21187296f0cb7fce8d17f2fd19f2085c09678b8843ad6760ddca3e32b2a18bb4d48b45e3f87dd631c4f5d8fa536ecfdd2bbed735e2cbb45d040cc"}, {"pub_key": "fba402ee09ca9b71faffd70212a6a25aa57b9d72353a7f0e62a70e61ff325b68ac63039d5bf654cddcf2595961d0b0d342a13b2b31f103198bdf320259dc6166", "amount": 10, "signature": "e5488af8c44712759029ca6ddcac1931a42c32936f3f9549346a346ce98c907aa39c009e3b8b4abf95d68a8c178d86523a145777e643a6a0c99d4069bfb74484"}]},
-    #    {"txn_id": "b4b531ef5c132b32cd4eaa5fbe3193edc35de8fe1a538c6b36ab3782e5d81ee2", "inputs": [{"txn_id": "5122c29da194036aab00f4bf7f621eee7e76174451c8bc6443098c3a07fd2d83", "index": 1}], "outputs": [{"pub_key": "61626364", "amount": 5, "signature": "1d80c0ca4415fadc70d8e49f3e45902f1a71b3ce1a642dc2aee240045e692fcb06614958d070afeb37d614deedfc48112417e55ef34f0d7b94dedd59b027c54d"}, {"pub_key": "fba402ee09ca9b71faffd70212a6a25aa57b9d72353a7f0e62a70e61ff325b68ac63039d5bf654cddcf2595961d0b0d342a13b2b31f103198bdf320259dc6166", "amount": 5, "signature": "b0236664094cd22c62644f3b2c319c4757d0e4f6ce6439ca4830c88ef74bed712c1c09d4afdfa79c319111d692de42bccbcf93cb5578a6539a271170a22fb594"}]},
-    #    {"txn_id": "1425210b148c3cd714c78313ab52ddfe57496418ceefa1b073b758f7a29b2bda", "inputs": [{"txn_id": "b4b531ef5c132b32cd4eaa5fbe3193edc35de8fe1a538c6b36ab3782e5d81ee2", "index": 1}], "outputs": [{"pub_key": "61626364", "amount": 10, "signature": "43d2a1f3e3bd033b55ff749dbb1efd30b02858d4085246ff71768dc44cc390b23140912067876354445ea462f50eede242eb0076e4504c9ca563c92efd92922a"}]}
-    #]
     from transaction import Transaction
+    # good txns
+    txn_list = [{"txn_id": "1f7fde67c75b03ceea8d745aeb82c0ce127f667992cc710f970dc3a90abd63d4", "inputs": [{"txn_id": "06eeaf748440eccc5fe44bc53b3c032b183b57f4274361484e4fbea508ebc872", "index": 0}], "outputs": [{"pub_key": "61626364", "amount": 40, "signature": "5061e1f8c8fe507381dfee844b5def68c8c570f290807032ff13b844cf4eeb15a111fa4b41b08f31e1d9bcc951f023d7aeb23d00917d6eb1f0e14a4f8b57a640"}, {"pub_key": "fba402ee09ca9b71faffd70212a6a25aa57b9d72353a7f0e62a70e61ff325b68ac63039d5bf654cddcf2595961d0b0d342a13b2b31f103198bdf320259dc6166", "amount": 10, "signature": "83e237ce72a5f68c9fb87bace4aef2a025e6e6651d4f346925b71148a5c1ff725b7cc2e21b5e68f43b22da24e58aace447ee471b09d7eb0a692c88d5103543bc"}]},{"txn_id": "ae1d53dc68663e84e56cdb77c2ea0c15eddaa177427e2662fc070306801005bd", "inputs": [{"txn_id": "1f7fde67c75b03ceea8d745aeb82c0ce127f667992cc710f970dc3a90abd63d4", "index": 1}], "outputs": [{"pub_key": "61626364", "amount": 5, "signature": "98a2b03835c6a0068f4bb04710314f49b8cdb45866969a35e389ff38206d17ce6fb1808c0b3080b231430e11a94b9b6db5c24bef4a68433a9bd1edbbfc2ec2de"}, {"pub_key": "fba402ee09ca9b71faffd70212a6a25aa57b9d72353a7f0e62a70e61ff325b68ac63039d5bf654cddcf2595961d0b0d342a13b2b31f103198bdf320259dc6166", "amount": 5, "signature": "71c4d43a9d9c82b1d848119da1c2d1fe80fd62590635398d05e4060239a40a36906661136f0277bfd0efc10c8cf619cbeea22fcee922af744f776869afc75cf0"}]},{"txn_id": "335f9b62e474e4cb44876f249e380edad06f7a353c1323acf8fb9488f72ff8f6", "inputs": [{"txn_id": "ae1d53dc68663e84e56cdb77c2ea0c15eddaa177427e2662fc070306801005bd", "index": 1}], "outputs": [{"pub_key": "61626364", "amount": 4, "signature": "5f5155d1a28fd1d586b336b248dd83e224535e22b5ab534e3668b7d023cef9011d1c1f7ca7ed8c845c51493452e782420f08ea4d064ae7f0354f4dae2deb06ce"}, {"pub_key": "fba402ee09ca9b71faffd70212a6a25aa57b9d72353a7f0e62a70e61ff325b68ac63039d5bf654cddcf2595961d0b0d342a13b2b31f103198bdf320259dc6166", "amount": 1, "signature": "3a45b96c71c1eed88f84c1abe732c77138403b582c7e8a70549e6f17ba05419d4725a83c7f93afc1d45a0b727d25b820e4e85e40ca1051c9ca17003efccf5d1c"}]}]
+    # bad txns
+    #txn_list = [{"txn_id": "5122c29da194036aab00f4bf7f621eee7e76174451c8bc6443098c3a07fd2d83", "inputs": [{"txn_id": "06eeaf748440eccc5fe44bc53b3c032b183b57f4274361484e4fbea508ebc872", "index": 0}], "outputs": [{"pub_key": "61626364", "amount": 40, "signature": "5bee4ed879a21187296f0cb7fce8d17f2fd19f2085c09678b8843ad6760ddca3e32b2a18bb4d48b45e3f87dd631c4f5d8fa536ecfdd2bbed735e2cbb45d040cc"}, {"pub_key": "fba402ee09ca9b71faffd70212a6a25aa57b9d72353a7f0e62a70e61ff325b68ac63039d5bf654cddcf2595961d0b0d342a13b2b31f103198bdf320259dc6166", "amount": 10, "signature": "e5488af8c44712759029ca6ddcac1931a42c32936f3f9549346a346ce98c907aa39c009e3b8b4abf95d68a8c178d86523a145777e643a6a0c99d4069bfb74484"}]},{"txn_id": "b4b531ef5c132b32cd4eaa5fbe3193edc35de8fe1a538c6b36ab3782e5d81ee2", "inputs": [{"txn_id": "5122c29da194036aab00f4bf7f621eee7e76174451c8bc6443098c3a07fd2d83", "index": 1}], "outputs": [{"pub_key": "61626364", "amount": 5, "signature": "1d80c0ca4415fadc70d8e49f3e45902f1a71b3ce1a642dc2aee240045e692fcb06614958d070afeb37d614deedfc48112417e55ef34f0d7b94dedd59b027c54d"}, {"pub_key": "fba402ee09ca9b71faffd70212a6a25aa57b9d72353a7f0e62a70e61ff325b68ac63039d5bf654cddcf2595961d0b0d342a13b2b31f103198bdf320259dc6166", "amount": 5, "signature": "b0236664094cd22c62644f3b2c319c4757d0e4f6ce6439ca4830c88ef74bed712c1c09d4afdfa79c319111d692de42bccbcf93cb5578a6539a271170a22fb594"}]},{"txn_id": "1425210b148c3cd714c78313ab52ddfe57496418ceefa1b073b758f7a29b2bda", "inputs": [{"txn_id": "b4b531ef5c132b32cd4eaa5fbe3193edc35de8fe1a538c6b36ab3782e5d81ee2", "index": 1}], "outputs": [{"pub_key": "61626364", "amount": 10, "signature": "43d2a1f3e3bd033b55ff749dbb1efd30b02858d4085246ff71768dc44cc390b23140912067876354445ea462f50eede242eb0076e4504c9ca563c92efd92922a"}]}]
     txns = [Transaction.from_json(txn_json) for txn_json in txn_list]
     global TXN_QUEUE
     with txn_queue_lock:
         TXN_QUEUE = txns
-    
     run_miner(miner)
-
     """
-    # TODO: load keys, exit if not exists
-    pub_key = None
-    pri_key = None
-
-    server = ChainServer(pub_key, pri_key)
-    server.run()
-    """
+    
+    block = Block.from_json({'hash': '0000029fe2de502979b5b1e345ff58b4c47f9f872c26999bc47752930a8a5f76', 'prev_hash': '00000e9f2fb735130801b4c31e40c3b9c6fa0789a13f8c5d685cd1602c97bafb', 'height': 1, 'nonce': 66240216508772406228315848838552293799641861242416215840665602550228984815026, 'transactions': [{'txn_id': 'adbcd37eb20dfe3cfe174358ac32c6b2da4027ea48ffd47e9af73689f4dc015f', 'inputs': [], 'outputs': [{'pub_key': 'fba402ee09ca9b71faffd70212a6a25aa57b9d72353a7f0e62a70e61ff325b68ac63039d5bf654cddcf2595961d0b0d342a13b2b31f103198bdf320259dc6166', 'amount': 50, 'signature': '108f9bdcb45f3823b78a76344fcb1c9cbfe3dbdb1fbc6869c52fd0c84ffae25f116d7253034e753171da1b0dab186cc1c0af656969379451308172a1311e5ed8'}]}, {'txn_id': '1f7fde67c75b03ceea8d745aeb82c0ce127f667992cc710f970dc3a90abd63d4', 'inputs': [{'txn_id': '06eeaf748440eccc5fe44bc53b3c032b183b57f4274361484e4fbea508ebc872', 'index': 0}], 'outputs': [{'pub_key': '61626364', 'amount': 40, 'signature': '5061e1f8c8fe507381dfee844b5def68c8c570f290807032ff13b844cf4eeb15a111fa4b41b08f31e1d9bcc951f023d7aeb23d00917d6eb1f0e14a4f8b57a640'}, {'pub_key': 'fba402ee09ca9b71faffd70212a6a25aa57b9d72353a7f0e62a70e61ff325b68ac63039d5bf654cddcf2595961d0b0d342a13b2b31f103198bdf320259dc6166', 'amount': 10, 'signature': '83e237ce72a5f68c9fb87bace4aef2a025e6e6651d4f346925b71148a5c1ff725b7cc2e21b5e68f43b22da24e58aace447ee471b09d7eb0a692c88d5103543bc'}]}, {'txn_id': 'ae1d53dc68663e84e56cdb77c2ea0c15eddaa177427e2662fc070306801005bd', 'inputs': [{'txn_id': '1f7fde67c75b03ceea8d745aeb82c0ce127f667992cc710f970dc3a90abd63d4', 'index': 1}], 'outputs': [{'pub_key': '61626364', 'amount': 5, 'signature': '98a2b03835c6a0068f4bb04710314f49b8cdb45866969a35e389ff38206d17ce6fb1808c0b3080b231430e11a94b9b6db5c24bef4a68433a9bd1edbbfc2ec2de'}, {'pub_key': 'fba402ee09ca9b71faffd70212a6a25aa57b9d72353a7f0e62a70e61ff325b68ac63039d5bf654cddcf2595961d0b0d342a13b2b31f103198bdf320259dc6166', 'amount': 5, 'signature': '71c4d43a9d9c82b1d848119da1c2d1fe80fd62590635398d05e4060239a40a36906661136f0277bfd0efc10c8cf619cbeea22fcee922af744f776869afc75cf0'}]}, {'txn_id': '335f9b62e474e4cb44876f249e380edad06f7a353c1323acf8fb9488f72ff8f6', 'inputs': [{'txn_id': 'ae1d53dc68663e84e56cdb77c2ea0c15eddaa177427e2662fc070306801005bd', 'index': 1}], 'outputs': [{'pub_key': '61626364', 'amount': 4, 'signature': '5f5155d1a28fd1d586b336b248dd83e224535e22b5ab534e3668b7d023cef9011d1c1f7ca7ed8c845c51493452e782420f08ea4d064ae7f0354f4dae2deb06ce'}, {'pub_key': 'fba402ee09ca9b71faffd70212a6a25aa57b9d72353a7f0e62a70e61ff325b68ac63039d5bf654cddcf2595961d0b0d342a13b2b31f103198bdf320259dc6166', 'amount': 1, 'signature': '3a45b96c71c1eed88f84c1abe732c77138403b582c7e8a70549e6f17ba05419d4725a83c7f93afc1d45a0b727d25b820e4e85e40ca1051c9ca17003efccf5d1c'}]}]})
+    CHAIN.insert_block(block)
+    wallet = Wallet(pub_key, pri_key)
+    run_wallet(wallet)
 
 
 if __name__ == "__main__":
     main()
-

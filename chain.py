@@ -6,7 +6,7 @@ from typing import List
 import crypto
 import rules
 from block import Block
-from transaction import Transaction
+from transaction import Transaction, LinkedTxnInput, LinkedTransaction
 
 
 STORAGE_DIR = os.path.join(os.path.dirname(__file__), "chain")
@@ -23,7 +23,7 @@ class BlockChain:
         self.storage_dir = storage_dir
 
         self.levels = []             # level  -> { block_hash -> BlockChainNode }
-        self.transactions = dict()   # txn_id -> Transaction
+        self.transactions = dict()   # txn_id -> LinkedTransaction
 
         self.max_height = 0
 
@@ -107,10 +107,6 @@ class BlockChain:
             # too far below tip to consider
             return False
 
-        if not self.verify_block(block_node.data):
-            # invalid block, reject
-            return False
-
         # load additional levels if necessary
         diff = block_node.data.height - len(self.levels) + 1
         for _ in range(diff):
@@ -119,6 +115,10 @@ class BlockChain:
         if block_node.prev:
             self.move_head(self.head_block, block_node.prev)
 
+        if not self.verify_block(block_node.data):
+            # invalid block, reject
+            return False
+        
         # apply block transactions
         self.apply_block(block_node)
 
@@ -143,10 +143,23 @@ class BlockChain:
             self.apply_transaction(txn)
     
     def apply_transaction(self, txn: Transaction) -> None:
-        self.transactions[txn.txn_id] = txn
+        """
+        Apply transaction to chain, linking it to its predecessor accordingly
+        """
+        linked_txn_inputs = []
+        for txn_in in txn.inputs:
+            assert txn_in.txn_id in self.transactions
+            # remove from pool
+            linked_txn = self.transactions[txn_in.txn_id]
 
-        for coin in self.coin_inputs(txn):
-            coin.spent = True
+            # link to incoming txn object
+            linked_txn_inputs.append(LinkedTxnInput(txn_in).link(linked_txn))
+
+            # spend coin
+            linked_txn.outputs[txn_in.index].spent = True
+        
+        linked_txn = LinkedTransaction(txn).link_inputs(linked_txn_inputs)
+        self.transactions[linked_txn.txn_id] = linked_txn
 
     def revert_block(self, block_node: BlockChainNode) -> None:
         """
@@ -159,10 +172,11 @@ class BlockChain:
             self.revert_transaction(txn)
     
     def revert_transaction(self, txn: Transaction) -> None:
-        self.transactions.pop(txn.txn_id)
+        linked_txn = self.transactions.pop(txn.txn_id)
 
-        for coin in self.coin_inputs(txn):
-            coin.spent = False
+        for linked_txn_in in linked_txn.inputs:
+            # unspend coin
+            linked_txn_in.txn.outputs[linked_txn_in.index].spent = False
     
     def move_head(self, src: BlockChainNode, dst: BlockChainNode) -> BlockChainNode:
         """
@@ -171,10 +185,10 @@ class BlockChain:
         to_apply = []
 
         # revert back to LCA
-        while src.height > dst.height:
+        while src.data.height > dst.data.height:
             self.revert_block(src.data)
             src = src.prev
-        while dst.height > src.height:
+        while dst.data.height > src.data.height:
             to_apply.append(dst.data)
             dst = dst.prev
 
@@ -195,9 +209,6 @@ class BlockChain:
         if block.height < 0:
             print('invalid block height', file=sys.stderr)
             return False
-        elif block.height == 0 and len(self.levels) >= 1:
-            print("can't overwrite genesis block", file=sys.stderr)
-            return False
         
         h = block.compute_hash()
 
@@ -212,19 +223,29 @@ class BlockChain:
         if len(block.transactions) < 1:
             print('no transactions', file=sys.stderr)
             return False
+        
+        invalid_txns = False
+        to_revert = []
 
-        block_txns = set()
         for i, txn in enumerate(block.transactions):
-            if txn.txn_id in block_txns:
-                return False
-            block_txns.add(txn.txn_id)
-
             # first txn is a coinbase txn
             is_coinbase = (i == 0)
 
             if not self.verify_transaction(txn, is_coinbase):
                 print('unable to verify transaction', file=sys.stderr)
-                return False
+                invalid_txns = True
+                break
+            
+            # temporary apply transaction
+            self.apply_transaction(txn)
+            to_revert.append(txn)
+        
+        for txn in reversed(to_revert):
+            # revert all applied transactions
+            self.revert_transaction(txn)
+        
+        if invalid_txns:
+            return False
 
         return True
 
@@ -245,9 +266,10 @@ class BlockChain:
                 print('invalid coinbase', file=sys.stderr)
                 return False
             sender_pubkey = txn.outputs[0].pub_key
-
+        
         for txn_in in txn.inputs:
             if txn_in.txn_id not in self.transactions:
+                print(list(self.transactions.values())[0].txn_id.hex())
                 print('incoming txn does not exist', file=sys.stderr)
                 return False
             
@@ -289,14 +311,6 @@ class BlockChain:
         
         return True
 
-    def coin_inputs(self, txn: Transaction):
-        coins = []
-        for txn_in in txn.inputs:
-            if txn_in.txn_id not in self.transactions:
-                continue
-            coins.append(self.transactions[txn_in.txn_id].outputs[txn_in.index])
-        return coins
-
 
 if __name__ == "__main__":
     bc = BlockChain()
@@ -305,7 +319,7 @@ if __name__ == "__main__":
     print("Transactions:")
     for txn_id, txn in bc.transactions.items():
         print("TXN ID:", txn_id.hex())
-        for prev_txn_out in bc.coin_inputs(txn):
+        for prev_txn_out in txn.coin_inputs():
             print("From:", prev_txn_out.pub_key.hex(), ", Amount:", prev_txn_out.amount)
         for txn_out in txn.outputs:
             print("To:", txn_out.pub_key.hex(), ", Amount:", txn_out.amount)
