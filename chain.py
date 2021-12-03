@@ -7,6 +7,7 @@ import rules
 from utils import get_logger
 from block import Block
 from transaction import Transaction, LinkedTxnInput, LinkedTransaction
+from time import time
 
 
 STORAGE_DIR = os.path.join(os.path.dirname(__file__), "chain")
@@ -175,6 +176,7 @@ class BlockChain:
             txn_out.spent = False
         
         linked_txn = LinkedTransaction.link(txn, linked_txn_inputs)
+        linked_txn.timestamp = time()
         self.transactions[linked_txn.txn_id] = linked_txn
 
     def revert_block(self, block_node: BlockChainNode) -> None:

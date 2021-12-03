@@ -6,6 +6,7 @@ from chain import BlockChain
 from transaction import Transaction, TxnInput, TxnOutput, LinkedTransaction, LinkedTxnInput
 import crypto
 import network_util
+from time import time
 
 
 PENDING_TXN_FILE = os.path.join(os.path.dirname(__file__), "wallet", "pending-txns.txt")
@@ -68,8 +69,9 @@ class Wallet:
 
         self.pending_txn_file = pending_txn_file
         self._pending_transactions: List[LocalTxn] = []
-        
+
         # create if not exists
+        """
         os.makedirs(os.path.dirname(pending_txn_file), exist_ok=True)
         open(pending_txn_file, 'a').close()
         with open(pending_txn_file, 'r') as stream:
@@ -77,6 +79,7 @@ class Wallet:
                 txn = LocalTxn.from_json(json.loads(line.strip()))
                 if txn is not None:
                     self._pending_transactions.append(txn)
+        """
 
         self.peers: List[network_util.Peer] = []
         self.transactions: List[LinkedTransaction] = []
@@ -87,6 +90,7 @@ class Wallet:
     
     def add_pending(self, txn: LinkedTransaction):
         local_txn = LocalTxn.from_linked_txn(txn)
+        local_txn.timestamp = time()
         self._pending_transactions.append(local_txn)
         with open(self.pending_txn_file, 'a') as stream:
             print(json.dumps(local_txn.to_json()), file=stream)
@@ -96,13 +100,18 @@ class Wallet:
         involved_txns = []
         balance = 0
 
+        pending_dict = {txn.txn_id: txn for txn in self._pending_transactions}
+
         for txn in transactions:
             involved = False
 
             sender_pubkey = None
             receiver_pubkey = None
             amount = 0
-            
+
+            if txn.txn_id in pending_dict:
+                print("Processed: " + txn.txn_id.hex() + " in " + str(txn.timestamp - pending_dict[txn.txn_id].timestamp))
+                        
             for coin in txn.coin_inputs():
                 sender_pubkey = coin.pub_key
                 
