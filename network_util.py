@@ -165,7 +165,7 @@ class IncomingNetworkInterface:
         self.logger.debug("Listening on port " + str(self.port))
     
     def accept_message(self):
-        conn = self.socket.accept()
+        conn, _ = self.socket.accept()
         message = rec_json(conn)
         return (conn, message)
 

@@ -101,9 +101,9 @@ def run_wallet(wallet: Wallet):
                 print("No peers online!")
                 continue
             
-            print("PUBKEY\t\tNAME\t\tPORT")
+            print("DISPLAY_NAME\t\tPUBKEY\t\tNAME\t\tPORT")
             for p in peers:
-                print(p.pub_key.hex(), p.name, p.port, sep='\t')
+                print(p.display_name, p.pub_key.hex(), p.name, p.port, sep='\t')
         
         elif cmd == "pending":
             with chain_lock:
@@ -296,7 +296,7 @@ def run_network_in(network_in: network_util.IncomingNetworkInterface, display_na
     network_in.start_listening()
     
     # send catalog updates in background
-    #threading.Thread(target=send_catalog_updates, args=(network_in.pub_key, network_in.port, display_name), daemon=True).start()
+    threading.Thread(target=send_catalog_updates, args=(network_in.pub_key, network_in.port, display_name), daemon=True).start()
 
     while True:
         (conn, msg) = network_in.accept_message()
