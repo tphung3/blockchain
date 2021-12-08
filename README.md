@@ -5,7 +5,8 @@ NDCoin is a secure and reliable peer-to-peer payment sevice.
 First, we strongly suggest that NDCoin nodes are run on the Notre Dame's student machines.
 
 Second, create an empty directory for the creation of nodes in system. Then make sure that you have python 3 installed and in your PATH as `python`. Then run `python prep.py` to spawn different nodes as each node requires a separate directory. `prep.py` will ask you to input the number of nodes you'd like to spawn, and we recommend a low number, maybe 3, at first. The python script will clone a NDCoin node to each directory named "node{i}" and generate a new public/private key pair for each additional node spawned. 
-Second, we use the `ecdsa` library for any operations related to the key pair, so if you have `pip3` in your PATH, run
+
+Third, we use the `ecdsa` library for any operations related to the key pair, so if you have `pip3` in your PATH, run
 ```
 $ pip3 install -r requirements.txt
 ```
@@ -66,16 +67,27 @@ Balance: 90
 
 ### 4. Overview of a Node's Structure
 Below we'll list and give a brief description of important files and directories in NDCoin's repository:
+
     * `block.py`: Implements the block object
+
     * `chain`: Persistent storage of the blockchain
+
     * `crypto.py`: Helper functions dealing with public/private key pairs
+
     * `gen-keys.py`: Helper script that generates a pair of keys
+
     * `miner.py`: Implements the miner object
+
     * `network_util.py`: Implements the network interface
+
     * `node.py`: Implements the node's master process when run
+
     * `prep.py`: Helper script that generates different nodes
+
     * `rules.py`: Specifies all rules concerning the blockchain, such as mining reward, minimum number of zeros, etc.
+
     * `transaction.py`: Implements the transaction object
+
     * `wallet.py`: Implements the wallet object
 
 ### 5. Miscellaneous
