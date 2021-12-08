@@ -8,13 +8,15 @@ def main():
     overwrite = False
     
     if len(sys.argv) > 1:
-        if sys.argv[1] == '-f':
+        if sys.argv[1] == '-f' or sys.argv[1] == '-F':
             overwrite = True
         else:
             print(f"Usage: {sys.argv[0]} [-f]", file=sys.stderr)
             sys.exit(1)
     
-    if input("Overwrite existing keys?  This will cause you to lose any existing coins. [y/n]: ").lower() != 'y':
+    if sys.argv[1] == '-F': #don't ask for user input
+        pass
+    elif input("Overwrite existing keys?  This will cause you to lose any existing coins. [y/n]: ").lower() != 'y':
         sys.exit(0)
 
     private_key = crypto.generate_private_key()
