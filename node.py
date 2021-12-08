@@ -14,12 +14,12 @@ from wallet import Wallet
 from miner import Miner
 
 
-BLOCK_QUEUE = queue.Queue()    # from network and miner – used by main and miner
-REQUEST_QUEUE = queue.Queue()  # from network – used by main
-OUT_QUEUE = queue.Queue()      # from main, wallet, and miner – used by network
-TXN_QUEUES = []                # from network and wallet – used by miner (list of queue.Queue objects)
+BLOCK_QUEUE = queue.Queue()     # from network and miner – used by main and miner
+REQUEST_QUEUE = queue.Queue()   # from network – used by main
+OUT_QUEUE = queue.Queue()       # from main, wallet, and miner – used by network
+TXN_QUEUES = []                 # from network and wallet – used by miner (list of queue.Queue objects)
 
-CHAIN = None                # modified by main – used by all
+CHAIN = None                    # modified by main – used by all
 chain_lock = threading.Lock()
 
 CHAIN_MODS = []   # has chain been modified while mining? - list of threading.Event objects for each miner
@@ -83,7 +83,8 @@ def run_wallet(wallet: Wallet):
                 transactions = deepcopy(list(CHAIN.transactions.values()))
             
             balance = wallet.get_balance(transactions)
-
+            
+            print("Relevant Transactions:")
             for txn in balance.involved_txns:
                 print('   ', txn)
             
@@ -95,9 +96,9 @@ def run_wallet(wallet: Wallet):
                 print("No peers online!")
                 continue
             
-            print("DISPLAY_NAME\t\tPUBKEY\t\tNAME\t\tPORT")
+            print("DISPLAY_NAME\tNAME\t\t\t\tPORT\t\tPUBKEY")
             for p in peers:
-                print(p.display_name, p.pub_key.hex(), p.name, p.port, sep='\t')
+                print(p.display_name, p.name, p.port, p.pub_key.hex(), sep='\t\t')
         
         elif cmd == "pending":
             with chain_lock:
@@ -112,7 +113,13 @@ def run_wallet(wallet: Wallet):
                 print('    ', txn)
 
         elif cmd == "help":
-            print("Commands:\n\tbalance\t\tview balance\n\tpeers\t\tlist peers")
+            msg = "Commands:\n" +\
+                "\tbalance\t\t\tview relevant transactions and total balance\n" +\
+                "\tpeers\t\t\tlist peers currently in network\n" +\
+                "\tpending\t\t\tfetch a list of pending transactions, not yet accepted to the blockchain\n" +\
+                "\tsend [pub_key] [amt]\tsend `amt` coins to identity associated with `pub_key`\n" +\
+                "\tquit\t\t\texit program"
+            print(msg)
 
         elif cmd == "quit":
             return
