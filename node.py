@@ -135,7 +135,7 @@ def accept_txns(miner: Miner, chain: BlockChain, txn_queue: queue.Queue, chain_m
     while True:
         # accept incoming txns until timeout, max txn count, or chain modification
         if chain_mod_event.is_set():
-            chain_mod_event.set()
+            chain_mod_event.clear()
             return False
 
         # timeout
