@@ -26,6 +26,7 @@ class BlockChain:
         self.transactions = dict()   # txn_id -> LinkedTransaction
 
         self.max_height = 0
+        self.num_txns = 0
         
         self.logger = get_logger()
 
@@ -102,7 +103,9 @@ class BlockChain:
         if block.height > 0 and prev is None:
             return None
 
-        return self.insert_block_node(BlockChainNode(prev, block))
+        ret = self.insert_block_node(BlockChainNode(prev, block))
+        if ret:
+            self.num_txns += len(block.transactions) - 1
 
     def insert_block_node(self, block_node: BlockChainNode) -> bool:
         """

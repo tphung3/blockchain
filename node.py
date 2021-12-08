@@ -123,6 +123,11 @@ def run_wallet(wallet: Wallet):
 
         elif cmd == "quit":
             return
+        
+        elif cmd == "wait":
+            while CHAIN.num_txns < 50:
+                time.sleep(0.1)
+            sys.exit(0)
 
         else:
             print("invalid command:", cmd)
@@ -135,7 +140,7 @@ def accept_txns(miner: Miner, chain: BlockChain, txn_queue: queue.Queue, chain_m
     while True:
         # accept incoming txns until timeout, max txn count, or chain modification
         if chain_mod_event.is_set():
-            chain_mod_event.set()
+            chain_mod_event.clear()
             return False
 
         # timeout
@@ -290,7 +295,7 @@ def run_network_in(network_in: network_util.IncomingNetworkInterface, display_na
     network_in.start_listening()
     
     # send catalog updates in background
-    threading.Thread(target=send_catalog_updates, args=(network_in.pub_key, network_in.port, display_name), daemon=True).start()
+    #threading.Thread(target=send_catalog_updates, args=(network_in.pub_key, network_in.port, display_name), daemon=True).start()
 
     while True:
         (conn, msg) = network_in.accept_message()
