@@ -304,7 +304,7 @@ class BlockChain:
             
             if prev_coin.spent:
                 self.logger.warn('coin already spent')
-                #return False
+                return False
 
             in_tot += prev_coin.amount
         
