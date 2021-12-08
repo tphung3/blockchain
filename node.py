@@ -2,33 +2,27 @@
 
 import sys
 import time
-import threading
+import threading, queue
 from copy import deepcopy
 import rules
 import crypto
 import network_util
-from chain import BlockChain, BlockChainNode
+from chain import BlockChain
 from block import Block
 from transaction import Transaction
 from wallet import Wallet
 from miner import Miner
 
 
-TXN_QUEUE = []      # from network and wallet – used by miner
-BLOCK_QUEUE = []    # from network and miner – used by main and miner
-REQUEST_QUEUE = []  # from network – used by main
-OUT_QUEUE = []      # from main, wallet, and miner – used by network
-
-txn_queue_lock = threading.Lock()
-block_queue_lock = threading.Lock()
-request_queue_lock = threading.Lock()
-out_queue_lock = threading.Lock()
+BLOCK_QUEUE = queue.Queue()    # from network and miner – used by main and miner
+REQUEST_QUEUE = queue.Queue()  # from network – used by main
+OUT_QUEUE = queue.Queue()      # from main, wallet, and miner – used by network
+TXN_QUEUES = []                # from network and wallet – used by miner (list of queue.Queue objects)
 
 CHAIN = None                # modified by main – used by all
-CHAIN_MODIFIED = False      # set by main – reset by miner
-
 chain_lock = threading.Lock()
-chain_modified_lock = threading.Lock()
+
+CHAIN_MODS = []   # has chain been modified while mining? - list of threading.Event objects for each miner
 
 
 def send_catalog_updates(pub_key, port, display_name):
@@ -40,7 +34,7 @@ def send_catalog_updates(pub_key, port, display_name):
 
 
 def run_wallet(wallet: Wallet):
-    global TXN_QUEUE, OUT_QUEUE, CHAIN
+    global TXN_QUEUES, OUT_QUEUE, CHAIN
 
     while True:
         try:
@@ -79,10 +73,10 @@ def run_wallet(wallet: Wallet):
             wallet.add_pending(txn)
             print("    TXN ID:", txn.txn_id.hex())
             
-            with txn_queue_lock:
-                TXN_QUEUE.append(txn)
-            with out_queue_lock:
-                OUT_QUEUE.append(txn.to_message())
+            for txn_queue in TXN_QUEUES:
+                txn_queue.put(txn)
+
+            OUT_QUEUE.put(txn.to_message())
         
         elif cmd == "balance":
             with chain_lock:
@@ -127,24 +121,18 @@ def run_wallet(wallet: Wallet):
             print("invalid command:", cmd)
 
 
-def accept_txns(miner: Miner, chain: BlockChain, pool: list, used: list):
-    global CHAIN_MODIFIED, TXN_QUEUE
-
+def accept_txns(miner: Miner, chain: BlockChain, txn_queue: queue.Queue, chain_mod_event: threading.Event, pool: list, used: list):
     miner.reset_pending_txns()
     s = time.time()
 
     while True:
         # accept incoming txns until timeout, max txn count, or chain modification
-
-        if CHAIN_MODIFIED:
-            with chain_modified_lock:
-                # unset flag
-                CHAIN_MODIFIED = False
-
+        if chain_mod_event.is_set():
+            chain_mod_event.set()
             return False
 
         # timeout
-        if time.time() - s >= rules.MINER_WAIT_TIMEOUT:
+        if (time.time() - s) >= rules.MINER_WAIT_TIMEOUT:
             # more than just coinbase txn
             if miner.num_pending_txns() > 1:
                 return True
@@ -152,9 +140,8 @@ def accept_txns(miner: Miner, chain: BlockChain, pool: list, used: list):
             # keep waiting, but refresh timeout
             s = time.time()
 
-        with txn_queue_lock:
-            while TXN_QUEUE:
-                txn = TXN_QUEUE.pop(0)
+            while not txn_queue.empty():
+                txn = txn_queue.get()
                 pool.append(txn)
                 used.append(False)
                 miner.logger.debug('added ' + txn.txn_id.hex() + ' to pool')
@@ -181,8 +168,8 @@ def accept_txns(miner: Miner, chain: BlockChain, pool: list, used: list):
                 return True
 
 
-def find_nonce(miner: Miner, chain: BlockChain, pool: list, used: list):
-    global CHAIN_MODIFIED, BLOCK_QUEUE, OUT_QUEUE
+def find_nonce(miner: Miner, chain: BlockChain, chain_mod_event: threading.Event, pool: list, used: list):
+    global BLOCK_QUEUE, OUT_QUEUE
     miner.logger.debug("started mining")
 
     chain_head = chain.head_block.data
@@ -195,10 +182,11 @@ def find_nonce(miner: Miner, chain: BlockChain, pool: list, used: list):
 
             miner.logger.debug("found nonce: " + str(nonce) + " for block = " + block.block_hash.hex())
 
-            with block_queue_lock:
-                BLOCK_QUEUE.append(block)
-            with out_queue_lock:
-                OUT_QUEUE.append(block.to_message())
+            BLOCK_QUEUE.put(block)
+            OUT_QUEUE.put(block.to_message())
+
+            # stop other miners within machine
+            chain_mod_event.set()
 
             # remove txns used in block
             pool = [txn for i, txn in enumerate(pool) if not used[i]]
@@ -207,20 +195,18 @@ def find_nonce(miner: Miner, chain: BlockChain, pool: list, used: list):
             return True
 
         # invalid nonce + chain has been modified
-        elif CHAIN_MODIFIED:
+        elif chain_mod_event.is_set():
             miner.logger.debug("chain was modified")
             for i in range(len(used)):
                 # unmark all txns in pool
                 used[i] = False
 
-            with chain_modified_lock:
-                # unset flag
-                CHAIN_MODIFIED = False
+            chain_mod_event.clear()
 
             return False
 
 
-def run_miner(miner: Miner):
+def run_miner(miner: Miner, txn_queue: queue.Queue, chain_mod_event: threading.Event, miner_num: int):
     global CHAIN
 
     pool = []   # pool of txns to mine
@@ -232,14 +218,16 @@ def run_miner(miner: Miner):
             chain = deepcopy(CHAIN)
             miner.logger.debug('copied chain')
         
-        if not accept_txns(miner, chain, pool, used):
+        if not accept_txns(miner, chain, txn_queue, chain_mod_event, pool, used):
             continue
 
-        find_nonce(miner, chain, pool, used)
+        s = time.time()
+        if find_nonce(miner, chain, chain_mod_event, pool, used):
+            print(f"miner {miner_num} found nonce in {time.time() - s:.2f}s")
 
 
 def handle_message(conn, msg):
-    global BLOCK_QUEUE, TXN_QUEUE
+    global BLOCK_QUEUE, TXN_QUEUES
 
     if msg is None:
         return
@@ -257,8 +245,7 @@ def handle_message(conn, msg):
         if block is None:
             return
 
-        with block_queue_lock:
-            BLOCK_QUEUE.append(block)
+        BLOCK_QUEUE.put(block)
 
     elif msg_type == "block-list":
         data = msg.get('data')
@@ -272,8 +259,8 @@ def handle_message(conn, msg):
         if not all(blocks):
             return
 
-        with block_queue_lock:
-            BLOCK_QUEUE += blocks
+        for block in blocks:
+            BLOCK_QUEUE.put(blocks)
 
     elif msg_type == "transaction":
         data = msg.get('data')
@@ -283,9 +270,9 @@ def handle_message(conn, msg):
         txn = Transaction.from_json(data)
         if txn is None:
             return
-            
-        with txn_queue_lock:
-            TXN_QUEUE.append(txn)
+
+        for txn_queue in TXN_QUEUES:
+            txn_queue.put(txn)
 
     elif msg_type == "block_request":
         # conn.send(CHAIN)
@@ -296,7 +283,7 @@ def run_network_in(network_in: network_util.IncomingNetworkInterface, display_na
     network_in.start_listening()
     
     # send catalog updates in background
-    threading.Thread(target=send_catalog_updates, args=(network_in.pub_key, network_in.port, display_name), daemon=True).start()
+    #threading.Thread(target=send_catalog_updates, args=(network_in.pub_key, network_in.port, display_name), daemon=True).start()
 
     while True:
         (conn, msg) = network_in.accept_message()
@@ -306,35 +293,34 @@ def run_network_in(network_in: network_util.IncomingNetworkInterface, display_na
 
 def run_network_out(network_out: network_util.OutgoingNetworkInterface):
     while True:
-        if OUT_QUEUE:
-            with out_queue_lock:
-                json_data = OUT_QUEUE.pop(0)
+        if not OUT_QUEUE.empty():
+            json_data = OUT_QUEUE.get()
             network_out.logger.debug("broadcasting type " + json_data['type'])
             network_out.broadcast(json_data)
         time.sleep(0.2)
 
 
 def run_maintainer():
-    global BLOCK_QUEUE, CHAIN, CHAIN_MODIFIED
+    global BLOCK_QUEUE, CHAIN, CHAIN_MODS
 
     while True:
-        if BLOCK_QUEUE:
-            with block_queue_lock:
-                block = BLOCK_QUEUE.pop(0)
+        if not BLOCK_QUEUE.empty():
+            block = BLOCK_QUEUE.get()
             
             with chain_lock:
                 if CHAIN.insert_block(block):
-                    print("\nNEW BLOCK PUBLISHED\n")
+                    print("NEW BLOCK PUBLISHED\n> ", end="")
                     CHAIN.logger.debug("inserting block " + block.block_hash.hex())
                     CHAIN.save_block_to_file(block)
-                    with chain_modified_lock:
-                        CHAIN_MODIFIED = True
+                    for event in CHAIN_MODS:
+                        event.set()
                 else:
                     CHAIN.logger.debug("rejecting block " + block.block_hash.hex())
+        time.sleep(0.2)
 
 
 def usage(status):
-    print(f"{sys.argv[0]} DISPLAY_NAME")
+    print(f"{sys.argv[0]} DISPLAY_NAME [-m MINERS]")
     sys.exit(status)
 
 
@@ -343,6 +329,14 @@ def main():
         usage(1)
     
     display_name = sys.argv[1]
+
+    num_miners = 1
+    if len(sys.argv) == 4 and sys.argv[2] == '-m':
+        try:
+            num_miners = int(sys.argv[3])
+        except ValueError:
+            print("Invalid number of miners", sys.stderr)
+            sys.exit(1)
     
     pub_key = crypto.load_public_key()
     pri_key = crypto.load_private_key()
@@ -352,16 +346,18 @@ def main():
     network_out = network_util.OutgoingNetworkInterface(pub_key)
     threads.append(threading.Thread(target=run_network_out, args=(network_out,), daemon=True))
 
-    miner = Miner(pub_key, pri_key)
-    threads.append(threading.Thread(target=run_miner, args=(miner,), daemon=True))
-
-    wallet = Wallet(pub_key, pri_key)
-    threads.append(threading.Thread(target=run_wallet, args=(wallet,), daemon=True))
-
     network_in = network_util.IncomingNetworkInterface(pub_key)
     threads.append(threading.Thread(target=run_network_in, args=(network_in,display_name), daemon=True))
 
     threads.append(threading.Thread(target=run_maintainer, daemon=True))
+
+    for i in range(num_miners):
+        txn_queue = queue.Queue()
+        TXN_QUEUES.append(txn_queue)
+        chain_mod_event = threading.Event()
+        CHAIN_MODS.append(chain_mod_event)
+        miner = Miner(pub_key, pri_key)
+        threads.append(threading.Thread(target=run_miner, args=(miner,txn_queue,chain_mod_event,i), daemon=True))
 
     global CHAIN
     CHAIN = BlockChain()
@@ -370,8 +366,9 @@ def main():
     for thread in threads:
         thread.start()
     
-    for thread in threads:
-        thread.join()
+    # wallet is main thread
+    wallet = Wallet(pub_key, pri_key)
+    run_wallet(wallet)
 
 if __name__ == "__main__":
     main()

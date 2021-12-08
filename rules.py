@@ -2,7 +2,7 @@ from utils import bytes_to_bits
 
 # Mining rules
 MINING_REWARD = 50
-MIN_ZEROS = 10
+MIN_ZEROS = 20
 MINER_WAIT_TIMEOUT = 5
 MAX_TXN_COUNT = 20
 
